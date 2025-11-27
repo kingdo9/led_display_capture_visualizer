@@ -1,0 +1,2234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Led Display Capture Visualizer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <style>
+        body {
+            background-color: #0f172a;
+            color: #e2e8f0;
+            font-family: "Inter", sans-serif;
+        }
+
+        /* ---------- Layout Columns ---------- */
+        .top-column {
+            flex-grow: 1;
+            min-width: 0;
+            border-right: 1px solid #1e293b;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            box-sizing: border-box;
+        }
+        .top-column:last-child {
+            border-right: none;
+        }
+
+        /* 40 + 18 + 24 + 18 = 100 */
+        .matrix-column {
+            flex-basis: 40%;
+            flex-grow: 1.5;
+        }
+        .controls-column {
+            flex-basis: 18%;
+            flex-grow: 1;
+        }
+        .decoder-column {
+            flex-basis: 24%;
+            flex-grow: 1;
+        }
+        .debug-column {
+            flex-basis: 18%;
+            flex-grow: 1;
+        }
+
+        /* ---------- LED Matrix Area ---------- */
+        .matrix-scroll-area {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 12px;
+            background-color: #020617;
+            width: 100%;
+            height: 100%;
+            max-width: 100%;
+            max-height: 100%;
+            flex: 1 1 auto;
+            min-width: 0;
+            min-height: 0;
+            overflow: hidden;
+            box-sizing: border-box;
+        }
+
+        .matrix-inner-pad {
+            padding: 8px;
+            flex-grow: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background-color: #0f172a;
+        }
+
+        .pixel-grid {
+            display: grid;
+            gap: 1px;
+            background-color: #1e293b;
+            padding: 1px;
+            border: 1px solid #334155;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
+            transform-origin: center;
+            max-width: 100%;
+            max-height: 100%;
+            width: auto;
+            height: auto;
+        }
+
+        .pixel {
+            width: var(--pixel-size, 5px);
+            height: var(--pixel-size, 5px);
+            background-color: #1e293b;
+        }
+        .pixel.active-r {
+            background-color: #ef4444;
+            box-shadow: 0 0 1px #ef4444;
+        }
+        .pixel.active-g {
+            background-color: #22c55e;
+            box-shadow: 0 0 1px #22c55e;
+        }
+        .pixel.active-b {
+            background-color: #3b82f6;
+            box-shadow: 0 0 1px #3b82f6;
+        }
+        .pixel.active-rgb {
+            background-color: #ffffff;
+            box-shadow: 0 0 2px #ffffff;
+        }
+
+        /* ---------- Drop Zone ---------- */
+        .drop-zone {
+            border: 2px dashed #475569;
+            transition: all 0.2s;
+            text-align: center;
+            cursor: pointer;
+        }
+        .drop-zone:hover {
+            border-color: #94a3b8;
+            color: white;
+        }
+        .drop-zone.dragover {
+            border-color: #3b82f6;
+            background-color: rgba(59, 130, 246, 0.1);
+            color: white;
+        }
+
+        /* ---------- Stats / Debug Styling ---------- */
+        .sig-hi {
+            color: #4ade80;
+            font-weight: bold;
+        }
+        .sig-lo {
+            color: #94a3b8;
+        }
+
+        .config-input {
+            background: #1e293b;
+            border: 1px solid #334155;
+            color: white;
+            padding: 2px 4px;
+            border-radius: 4px;
+            width: 45px;
+            text-align: center;
+            font-family: monospace;
+        }
+
+        /* ---------- Range Sliders ---------- */
+        input[type="range"] {
+            -webkit-appearance: none;
+            background: transparent;
+            display: block;
+            width: 100%;
+            margin: 8px 0;
+        }
+        input[type="range"]::-webkit-slider-runnable-track {
+            width: 100%;
+            height: 6px;
+            cursor: pointer;
+            background: #374151;
+            border-radius: 4px;
+        }
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            height: 16px;
+            width: 16px;
+            border-radius: 50%;
+            background: #3b82f6;
+            cursor: pointer;
+            margin-top: -5px;
+            box-shadow: 0 0 2px rgba(0, 0, 0, 0.5);
+        }
+        #fine-seek-slider::-webkit-slider-thumb {
+            background: #f59e0b;
+        }
+
+        /* ---------- Event Debug ---------- */
+        .debug-header {
+            font-size: 13px;
+            font-family: "Courier New", monospace;
+            font-weight: bold;
+            color: #ccc;
+            padding: 4px 4px;
+            background-color: #1f2937;
+            border-bottom: 1px solid #334155;
+        }
+        .debug-row {
+            font-family: "Courier New", monospace;
+            font-size: 14px;
+            padding: 4px 4px;
+            border-bottom: 1px solid #1e293b;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .debug-row.active {
+            background-color: #1e3a8a;
+            border-left: 3px solid #60a5fa;
+            color: white;
+        }
+
+        .channel-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: #0f172a;
+            border: 1px solid #1f2937;
+            border-radius: 6px;
+            padding: 6px 8px;
+            gap: 10px;
+        }
+        .channel-meta {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .channel-checkbox {
+            width: 14px;
+            height: 14px;
+            accent-color: #3b82f6;
+        }
+        .channel-name {
+            font-size: 11px;
+            color: #e2e8f0;
+            font-weight: 700;
+            letter-spacing: 0.3px;
+        }
+        .channel-select {
+            background: #1e293b;
+            border: 1px solid #334155;
+            color: #e2e8f0;
+            font-size: 10px;
+            padding: 3px 6px;
+            border-radius: 5px;
+            outline: none;
+        }
+        .channel-select:focus {
+            border-color: #3b82f6;
+            box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.2);
+        }
+        .channel-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 8px;
+        }
+
+        .d-idx {
+            width: 55px;
+            color: #e2e8f0;
+            font-weight: bold;
+        }
+        .d-addr {
+            width: 35px;
+            color: #facc15;
+            text-align: center;
+        }
+        .d-data {
+            width: 65px;
+            color: #a78bfa;
+            text-align: center;
+            letter-spacing: 1px;
+        }
+        .d-sig {
+            width: 20px;
+            text-align: center;
+            font-weight: bold;
+        }
+
+        .sig-on {
+            color: #4ade80;
+        }
+        .sig-off {
+            color: #475569;
+        }
+    </style>
+</head>
+
+<body class="h-screen flex flex-col bg-gray-900 overflow-hidden">
+    <!-- =================================================================== -->
+    <!-- TOP SECTION: FOUR-COLUMN INTERFACE (LED Display + Controls + Stats) -->
+    <!-- =================================================================== -->
+    <div
+        id="interface-container"
+        class="flex border-b border-gray-700"
+        style="height: 50%"
+    >
+        <!-- 1. LED DISPLAY ------------------------------------------------- -->
+        <div class="top-column matrix-column bg-gray-900">
+            <h1
+                class="text-sm font-bold text-white p-2 text-center border-b border-gray-800"            >
+                LED DISPLAY
+            </h1>
+            <!-- FM6373 brightness toggle -->
+            <div class="px-2 pb-1 flex items-center justify-center gap-2 text-[10px] text-gray-400 border-b border-gray-800">
+                <span class="font-semibold tracking-wide uppercase">Experiment Brightness</span>
+                <label class="inline-flex items-center cursor-pointer">
+                    <input type="checkbox" id="fm-brightness-toggle" class="sr-only peer">
+                    <div class="relative w-7 h-3.5 bg-gray-700 rounded-full peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-offset-2 peer-focus:ring-blue-500 peer-checked:bg-red-500">
+                        <span class="absolute top-[2px] left-[2px] h-3 w-3 bg-white rounded-full shadow transition-transform peer-checked:translate-x-3"></span>
+                    </div>
+                </label>
+                <span id="fm-brightness-label" class="text-[10px] text-gray-500">Off</span>
+            </div>            
+            <div class="flex-1 relative overflow-hidden matrix-inner-pad">
+                <div class="matrix-scroll-area">
+                    <div id="pixel-grid" class="pixel-grid"></div>
+                </div>
+
+                <!-- full-screen "busy" overlay -->
+                <div
+                    id="loading-overlay"
+                    class="absolute inset-0 bg-gray-900/80 flex items-center justify-center hidden z-50"
+                >
+                    <div class="text-xl font-bold text-white animate-pulse">
+                        Processing Data...
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 2. CONTROLS + PLAYBACK ---------------------------------------- -->
+        <div class="top-column controls-column bg-gray-800">
+            <h1
+                class="text-sm font-bold text-white p-2 text-center border-b border-gray-700"
+            >
+                CONTROLS
+            </h1>
+
+            <div class="p-2 overflow-y-auto flex-1">
+                <!-- CSV FILE INPUT / DROP ZONE -->
+                <div class="mb-1">
+                    <div
+                        id="drop-zone"
+                        class="drop-zone py-2 rounded-lg text-xs text-gray-400 bg-gray-900/50"
+                    >
+                        Drop <strong>.csv</strong> here
+                        <input
+                            type="file"
+                            id="file-input"
+                            accept=".csv"
+                            class="hidden"
+                        />
+                    </div>
+                </div>
+
+                <!-- DISPLAY CONFIG -->
+                <div class="mb-1 p-2 bg-gray-900 rounded">
+                    <h3
+                        class="text-[10px] text-gray-500 uppercase tracking-wider font-bold mb-1"
+                    >
+                        DISPLAY CONFIG
+                    </h3>
+                    <div class="flex items-center justify-between mb-1">
+                        <div class="flex items-center space-x-2">
+                            <label
+                                class="text-xs text-gray-400 font-bold"
+                                for="width-override"
+                                >W:</label
+                            >
+                            <input
+                                type="number"
+                                id="width-override"
+                                class="config-input"
+                                value="128"
+                            />
+                            <label
+                                class="text-xs text-gray-400 font-bold"
+                                for="height-override"
+                                >H:</label
+                            >
+                            <input
+                                type="number"
+                                id="height-override"
+                                class="config-input"
+                                value="64"
+                            />
+                        </div>
+
+                        <button
+                            id="btn-apply-config"
+                            class="text-xs bg-blue-600 hover:bg-blue-500 text-white px-3 py-1 rounded font-bold shadow"
+                        >
+                            Set
+                        </button>
+                    </div>
+
+                    <!-- overwrite black toggle -->
+                    <div class="flex justify-between items-center text-xs">
+                        <span class="text-[10px] text-gray-400 font-bold"
+                            >Overwrite Black (0)</span
+                        >
+                        <label class="inline-flex items-center cursor-pointer">
+                            <input
+                                type="checkbox"
+                                id="overwrite-black-toggle"
+                                class="sr-only peer"
+                                checked
+                            />
+                            <div
+                                class="relative w-7 h-3.5 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[1px] after:start-[1px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-red-500"
+                            ></div>
+                        </label>
+                    </div>
+
+                    <!-- persist frame toggle -->
+                    <div class="flex justify-between items-center text-xs">
+                        <span class="text-[10px] text-gray-400 font-bold"
+                            >Persist Frame (No Clear)</span
+                        >
+                        <label class="inline-flex items-center cursor-pointer">
+                            <input
+                                type="checkbox"
+                                id="persist-frame-toggle"
+                                class="sr-only peer"
+                            />
+                            <div
+                                class="relative w-7 h-3.5 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[1px] after:start-[1px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-blue-500"
+                            ></div>
+                        </label>
+                    </div>
+                </div>
+
+                <!-- PLAYBACK CONTROLS -->
+                <div class="p-2 bg-gray-900 rounded">
+                    <h3
+                        class="text-[10px] text-blue-400 uppercase tracking-wider font-bold mb-1"
+                    >
+                        PLAYBACK CONTROL
+                    </h3>
+
+                    <!-- coarse speed slider -->
+                    <div class="mb-1 py-1">
+                        <div
+                            class="flex justify-between text-[10px] text-gray-400 mb-1"
+                        >
+                            <span>Speed</span>
+                            <span id="speed-display">--</span>
+                        </div>
+                        <input
+                            type="range"
+                            id="speed-slider"
+                            min="0"
+                            max="100"
+                            value="40"
+                            class="w-full py-1"
+                        />
+                    </div>
+
+                    <!-- fine seek slider -->
+                    <div class="mb-2 py-1">
+                        <div
+                            class="flex justify-between text-[10px] text-gray-400 mb-1"
+                        >
+                            <span>Fine Seek (3x)</span>
+                            <span
+                                id="fine-seek-display"
+                                class="text-amber-400 font-mono"
+                                >0</span
+                            >
+                        </div>
+                        <input
+                            type="range"
+                            id="fine-seek-slider"
+                            min="0"
+                            max="100"
+                            value="50"
+                            class="w-full py-1"
+                            disabled
+                        />
+                    </div>
+
+                    <!-- play / pause -->
+                    <div class="mb-2">
+                        <button
+                            id="btn-toggle-play"
+                            class="w-full bg-green-600 hover:bg-green-500 text-white py-2 px-2 rounded-md text-sm font-bold shadow-md transition-colors"
+                            disabled
+                        >
+                            PLAY
+                        </button>
+                    </div>
+
+                    <!-- scrubber -->
+                    <div class="w-full py-1">
+                        <input
+                            type="range"
+                            id="scrubber"
+                            min="0"
+                            max="100"
+                            value="0"
+                            class="w-full h-2 bg-gray-700 rounded-lg cursor-pointer"
+                            disabled
+                        />
+                    </div>
+                    <div
+                        class="text-center text-xs text-gray-300 font-bold mt-1"
+                    >
+                        Event:
+                        <span id="scrub-val" class="text-white">0</span> /
+                        <span id="total-val" class="text-gray-400">0</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 3. DECODER STATE (Stats + Waveform Channel Toggles) ----------- -->
+        <div class="top-column decoder-column bg-gray-900">
+            <h1
+                class="text-sm font-bold text-white p-2 text-center border-b border-gray-700"
+            >
+                DECODER STATE
+            </h1>
+
+            <!-- stats + control signals -->
+            <div class="p-4 border-b border-gray-700 space-y-2">
+                <div class="grid grid-cols-2 gap-4">
+                    <!-- STATS -->
+                    <div>
+                        <h2 class="text-xs font-semibold text-gray-300 mb-1">
+                            STATS
+                        </h2>
+                        <div class="space-y-1 font-mono text-xs">
+                            <div class="flex justify-between">
+                                <span class="text-gray-400">Time:</span>
+                                <span id="stat-time" class="text-white"
+                                    >0.00000000s</span
+                                >
+                            </div>
+                            <div class="flex justify-between">
+                                <span class="text-gray-400">Row Addr:</span>
+                                <span
+                                    id="stat-addr"
+                                    class="text-yellow-400 font-bold"
+                                    >--</span
+                                >
+                            </div>
+                            <div class="flex justify-between">
+                                <span class="text-gray-400">Active Rows:</span>
+                                <span id="stat-scan" class="text-blue-400"
+                                    >--</span
+                                >
+                            </div>
+                            <div class="flex justify-between">
+                                <span class="text-gray-400">Buffer Len:</span>
+                                <span id="stat-shift" class="text-purple-400"
+                                    >0</span
+                                >
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- CONTROL SIGNALS -->
+                    <div>
+                        <h2 class="text-xs font-semibold text-gray-300 mb-1">
+                            SIGNALS
+                        </h2>
+                        <div class="space-y-1 font-mono text-xs">
+                            <div
+                                class="flex justify-between items-center text-gray-200"
+                            >
+                                <span>OE (Output)</span>
+                                <span id="sig-oe" class="sig-lo">HI (OFF)</span>
+                            </div>
+                            <div
+                                class="flex justify-between items-center text-gray-200"
+                            >
+                                <span>LAT (Latch)</span>
+                                <span id="sig-lat" class="sig-lo">LO</span>
+                            </div>
+                            <div
+                                class="flex justify-between items-center text-gray-200"
+                            >
+                                <span>CLK (Clock)</span>
+                                <span id="sig-clk" class="sig-lo">LO</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- waveform channels -->
+            <div class="p-2 bg-gray-850 overflow-y-auto flex-1">
+                <h3 class="text-sm font-bold text-green-500 mb-2">
+                    WAVEFORM CHANNELS
+                </h3>
+                <div id="channel-toggles" class="channel-grid"></div>
+            </div>
+        </div>
+
+        <!-- 4. EVENT DEBUG ------------------------------------------------- -->
+        <div class="top-column debug-column bg-gray-900">
+            <h1
+                class="text-sm font-bold text-white p-2 text-center border-b border-gray-700"
+            >
+                EVENT DEBUG (+/- 30)
+            </h1>
+
+            <div
+                class="debug-header flex justify-between px-2 bg-gray-850 border-b border-gray-700"
+            >
+                <span class="d-idx">IDX</span>
+                <span class="d-addr">ADR</span>
+                <span class="d-data">RGB0 RGB1</span>
+                <span class="d-sig">C</span>
+                <span class="d-sig">L</span>
+                <span class="d-sig">O</span>
+            </div>
+
+            <div id="debug-list" class="flex-1 overflow-hidden bg-gray-900">
+                <div class="p-4 text-center text-gray-500 text-xs mt-10">
+                    Load CSV to view data
+                    <div
+                        class="mt-4 text-[10px] font-mono space-y-1"
+                    >
+                        <div class="flex justify-between">
+                            <span>File Status:</span>
+                            <span
+                                id="file-status"
+                                class="text-white"
+                                >No File</span
+                            >
+                        </div>
+                        <div class="flex justify-between">
+                            <span>Config:</span>
+                            <span
+                                id="config-display"
+                                class="text-gray-300"
+                                >128x64</span
+                            >
+                        </div>
+                        <div class="flex justify-between">
+                            <span>Detected Clocks:</span>
+                            <span
+                                id="detected-width-display"
+                                class="text-yellow-400"
+                                >--</span
+                            >
+                        </div>
+                        <div class="flex justify-between">
+                            <span>Headers Found:</span>
+                            <span
+                                id="headers-status"
+                                class="text-green-400"
+                                >--</span
+                            >
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ========================= SPLITTER =============================== -->
+    <div
+        class="h-2 bg-gray-800 hover:bg-blue-600 cursor-row-resize flex justify-center items-center z-50"
+        id="main-splitter"
+    >
+        <div class="w-12 h-1 bg-gray-600 rounded"></div>
+    </div>
+
+    <!-- ======================= WAVEFORM VIEW ============================ -->
+    <div
+        id="waveform-container"
+        class="flex-1 bg-gray-950 relative overflow-hidden flex flex-col min-h-0"
+    >
+        <canvas id="wave-canvas" class="flex-1 w-full"></canvas>
+        <div
+            class="absolute top-2 right-2 bg-gray-900/80 px-2 py-1 rounded text-[10px] text-gray-400 pointer-events-none border border-gray-700 shadow"
+        >
+            Left: Control | Right: Data | Scroll to Zoom
+        </div>
+    </div>
+
+    <!-- ================================================================== -->
+    <!-- SCRIPT: CSV parsing, FM6373 decoding, playback & UI wiring         -->
+    <!-- ================================================================== -->
+    <script>
+        // ------------------------------------------------------------------
+        //  PANEL / DECODER CONFIGURATION
+        // ------------------------------------------------------------------
+        let PANEL_WIDTH = 128;
+        let PANEL_HEIGHT = 64;
+
+        const DISPLAY_MARGIN = 12;
+        const PIXEL_GAP = 1;
+        const GRID_EXTRA = 4; // padding + border
+
+        // Bit masks for packed signal word
+        const MASK_ADDR = 0x1f;
+        const MASK_CLK = 1 << 11;
+        const MASK_LAT = 1 << 12;
+        const MASK_OE = 1 << 13;
+
+        // FM6373 / DP32019B specifics
+        const FM6373_LAST_INIT_WORD = 0xaa80;
+        const MAX_SCAN_ROWS = 32; // 1/32 scan
+
+        // FM6373 mode flag (future: toggle via UI if you support other chipsets)
+        let fm6373Mode = true;
+
+        // Time / signal data
+        let dataTimes = null; // Float32Array
+        let dataSignals = null; // Uint16Array
+        let totalEvents = 0;
+
+        // Frame start index after FM6373 init sequence
+        let firstDataIndex = 0;
+
+        // Playback & keyframes
+        const KEYFRAME_INTERVAL = 5000;
+        let keyframes = [];
+        let playbackIndex = 0;
+        let fineSeekBaseIndex = 0;
+        let isPlaying = false;
+        let lastFrameTime = 0;
+        let playbackAccumulator = 0;
+
+        // Playback options
+        let forceWriteBlack = true;
+        let persistFrame = true;
+
+        // Waveform view state
+        let waveZoom = 10;
+        let isPanning = false;
+        let lastPanX = 0;
+        let panAccumulator = 0;
+        let latPulseUntil = 0;
+
+        // Virtual panel state (generic RGB, used for non-FM6373 mode)
+        let vmAddress = 0;
+        let vmBuffer0 = [];
+        let vmBuffer1 = [];
+        let vmGridState = null; // Uint8Array, per-pixel RGB bits
+
+        // Actual DOM pixels (divs)
+        let pixelElements = [];
+        let domGridState = null; // copy of vmGridState last flushed to DOM
+
+        // Simple RGB frame buffers (generic, not FM6373-specific)
+        const pixCount = PANEL_WIDTH * PANEL_HEIGHT;
+        let pixR = new Uint8Array(pixCount);
+        let pixG = new Uint8Array(pixCount);
+        let pixB = new Uint8Array(pixCount);
+
+        // FM6373 decoded frame buffers (right now we only decode R)
+        let fmFrameR = null;
+        let fmFrameG = null;
+        let fmFrameB = null;
+        let fmPixelEvent = null; // event index that wrote this pixel
+        let fmPixelRawWord = null; // raw 16-bit word that produced the pixel
+
+        // ------------------------------------------------------------------
+        //  DOM ELEMENT REFERENCES
+        // ------------------------------------------------------------------
+        const dropZone = document.getElementById("drop-zone");
+        const fileInput = document.getElementById("file-input");
+        const grid = document.getElementById("pixel-grid");
+
+        const configDisplay = document.getElementById("config-display");
+        const detectedWidthDisplay = document.getElementById(
+            "detected-width-display"
+        );
+        const headersStatus = document.getElementById("headers-status");
+        const fileStatus = document.getElementById("file-status");
+
+        const widthInput = document.getElementById("width-override");
+        const heightInput = document.getElementById("height-override");
+        const btnApplyConfig = document.getElementById("btn-apply-config");
+
+        const loadingOverlay = document.getElementById("loading-overlay");
+        const debugList = document.getElementById("debug-list");
+
+        const waveCanvas = document.getElementById("wave-canvas");
+        const waveformContainer =
+            document.getElementById("waveform-container");
+
+        const channelTogglesDiv = document.getElementById("channel-toggles");
+        const matrixScrollArea = document.querySelector(".matrix-scroll-area");
+
+        const mainSplitter = document.getElementById("main-splitter");
+        const interfaceContainer =
+            document.getElementById("interface-container");
+
+        const elTime = document.getElementById("stat-time");
+        const elAddr = document.getElementById("stat-addr");
+        const elScan = document.getElementById("stat-scan");
+        const elShift = document.getElementById("stat-shift");
+
+        const elSigOE = document.getElementById("sig-oe");
+        const elSigLAT = document.getElementById("sig-lat");
+        const elSigCLK = document.getElementById("sig-clk");
+
+        const scrubber = document.getElementById("scrubber");
+        const scrubVal = document.getElementById("scrub-val");
+        const totalVal = document.getElementById("total-val");
+
+        const speedSlider = document.getElementById("speed-slider");
+        const speedDisplay = document.getElementById("speed-display");
+        const fineSeekSlider = document.getElementById("fine-seek-slider");
+        const fineSeekDisplay = document.getElementById("fine-seek-display");
+        const btnTogglePlay = document.getElementById("btn-toggle-play");
+        const overwriteBlackToggle = document.getElementById("overwrite-black-toggle");
+        const persistFrameToggle = document.getElementById("persist-frame-toggle");
+
+        // FM6373 brightness: off by default, can be toggled from UI
+        let fmUseBrightness = false;
+        const fmBrightnessToggle = document.getElementById('fm-brightness-toggle');
+        const fmBrightnessLabel = document.getElementById('fm-brightness-label');
+
+        // Resize observers for display & waveform
+        let matrixResizeObserver = null;
+        let waveformResizeObserver = null;
+
+        // For debugging row drawing from console
+        window.debugRow = -1;
+
+        // ------------------------------------------------------------------
+        //  WAVEFORM CHANNEL DEFINITIONS
+        // ------------------------------------------------------------------
+        const WAVE_CHANNELS = [
+            { name: "A", mask: 1, color: "#22d3ee", column: "left", defaultEnabled: true },
+            { name: "B", mask: 1 << 1, color: "#0ea5e9", column: "left", defaultEnabled: true },
+            { name: "C", mask: 1 << 2, color: "#c084fc", column: "left", defaultEnabled: true },
+            { name: "D", mask: 1 << 3, color: "#f97316", column: "right", defaultEnabled: false },
+            { name: "E", mask: 1 << 4, color: "#f472b6", column: "right", defaultEnabled: false },
+            { name: "OE", mask: MASK_OE, color: "#facc15", column: "left", defaultEnabled: true },
+            { name: "LAT", mask: MASK_LAT, color: "#facc15", column: "left", defaultEnabled: true },
+            { name: "CLK", mask: MASK_CLK, color: "#38bdf8", column: "left", defaultEnabled: true },
+            { name: "R0", mask: 1 << 5, color: "#ef4444", column: "right", defaultEnabled: true },
+            { name: "G0", mask: 1 << 6, color: "#22c55e", column: "right", defaultEnabled: true },
+            { name: "B0", mask: 1 << 7, color: "#3b82f6", column: "right", defaultEnabled: true },
+            { name: "R1", mask: 1 << 8, color: "#ef4444", column: "right", defaultEnabled: true },
+            { name: "G1", mask: 1 << 9, color: "#22c55e", column: "right", defaultEnabled: true },
+            { name: "B1", mask: 1 << 10, color: "#3b82f6", column: "right", defaultEnabled: true }
+        ];
+
+        let enabledChannels = WAVE_CHANNELS.map(
+            (ch) => ch.defaultEnabled !== false
+        );
+
+        // ------------------------------------------------------------------
+        //  INITIALISATION
+        // ------------------------------------------------------------------
+        function init() {
+            initGrid(PANEL_WIDTH, PANEL_HEIGHT);
+            initChannelToggles();
+
+            persistFrameToggle.checked = persistFrame;
+
+            // New: FM6373 brightness toggle initial state
+            if (fmBrightnessToggle) {
+                fmBrightnessToggle.checked = fmUseBrightness;
+                fmBrightnessLabel.textContent = fmUseBrightness ? "On" : "Off";
+            }
+
+            observeMatrixSize();
+            observeWaveformSize();
+            requestAnimationFrame(fitGridToContainer);
+            requestAnimationFrame(resizeCanvas);
+
+            wireUIEvents();
+        }
+
+        // ------------------------------------------------------------------
+        //  GRID / PIXEL INITIALISATION
+        // ------------------------------------------------------------------
+        function allocFmFrame() {
+            const pxCount = PANEL_WIDTH * PANEL_HEIGHT;
+            fmFrameR = new Uint8Array(pxCount);
+            fmFrameG = new Uint8Array(pxCount);
+            fmFrameB = new Uint8Array(pxCount);
+
+            fmPixelEvent = new Int32Array(pxCount);
+            fmPixelRawWord = new Uint16Array(pxCount);
+            fmPixelEvent.fill(-1);
+            fmPixelRawWord.fill(0);
+        }
+
+        function initGrid(width, height) {
+            grid.innerHTML = "";
+            grid.style.gridTemplateColumns = `repeat(${width}, var(--pixel-size, 5px))`;
+            grid.style.gridAutoRows = "var(--pixel-size, 5px)";
+
+            const count = width * height;
+            pixelElements = new Array(count);
+            vmGridState = new Uint8Array(count);
+            domGridState = new Uint8Array(count);
+
+            const fragment = document.createDocumentFragment();
+
+            for (let i = 0; i < count; i++) {
+                const p = document.createElement("div");
+                p.className = "pixel";
+
+                const idx = i;
+                p.addEventListener("click", () => {
+                    const x = idx % PANEL_WIDTH;
+                    const y = Math.floor(idx / PANEL_WIDTH);
+                    let msg = `Pixel (${x},${y}) [idx=${idx}]`;
+
+                    if (fm6373Mode && fmFrameR && fmPixelEvent && fmPixelRawWord) {
+                        const b = fmFrameR[idx];
+                        const ev = fmPixelEvent[idx];
+                        const rawWord = fmPixelRawWord[idx];
+                        msg += ` | fmFrameR=${b}`;
+                        if (ev >= 0) {
+                            const rawHex = rawWord.toString(16).padStart(4, "0");
+                            msg += ` | written at event ${ev}, rawWord=0x${rawHex}`;
+                        } else {
+                            msg += " | (no FM6373 write recorded)";
+                        }
+                    }
+
+                    console.log(msg);
+                });
+
+                fragment.appendChild(p);
+                pixelElements[i] = p;
+            }
+
+            grid.appendChild(fragment);
+            configDisplay.textContent = `${width}x${height}`;
+
+            requestAnimationFrame(fitGridToContainer);
+        }
+
+        function observeMatrixSize() {
+            if (!matrixScrollArea) return;
+            if (matrixResizeObserver) matrixResizeObserver.disconnect();
+
+            matrixResizeObserver = new ResizeObserver(() =>
+                requestAnimationFrame(fitGridToContainer)
+            );
+            matrixResizeObserver.observe(matrixScrollArea);
+        }
+
+        function observeWaveformSize() {
+            if (!waveformContainer || !waveCanvas) return;
+            if (waveformResizeObserver) waveformResizeObserver.disconnect();
+
+            waveformResizeObserver = new ResizeObserver(() =>
+                requestAnimationFrame(resizeCanvas)
+            );
+            waveformResizeObserver.observe(waveformContainer);
+        }
+
+        function fitGridToContainer() {
+            if (!matrixScrollArea || !grid) return;
+
+            const areaRect = matrixScrollArea.getBoundingClientRect();
+            const availableW = Math.max(0, areaRect.width - DISPLAY_MARGIN * 2);
+            const availableH = Math.max(0, areaRect.height - DISPLAY_MARGIN * 2);
+            if (availableW === 0 || availableH === 0) return;
+
+            const totalGapW = (PANEL_WIDTH - 1) * PIXEL_GAP;
+            const totalGapH = (PANEL_HEIGHT - 1) * PIXEL_GAP;
+            const maxPixelW =
+                (availableW - totalGapW - GRID_EXTRA) / PANEL_WIDTH;
+            const maxPixelH =
+                (availableH - totalGapH - GRID_EXTRA) / PANEL_HEIGHT;
+            const px = Math.max(1, Math.min(maxPixelW, maxPixelH));
+
+            grid.style.setProperty("--pixel-size", `${px}px`);
+            grid.style.width = `${
+                PANEL_WIDTH * px + totalGapW + GRID_EXTRA
+            }px`;
+            grid.style.height = `${
+                PANEL_HEIGHT * px + totalGapH + GRID_EXTRA
+            }px`;
+        }
+
+        // ------------------------------------------------------------------
+        //  WAVEFORM CHANNEL TOGGLES
+        // ------------------------------------------------------------------
+        function getEnabledCount(column) {
+            return WAVE_CHANNELS.reduce(
+                (acc, ch, i) =>
+                    acc + (ch.column === column && enabledChannels[i] ? 1 : 0),
+                0
+            );
+        }
+
+        function initChannelToggles() {
+            channelTogglesDiv.innerHTML = "";
+
+            WAVE_CHANNELS.forEach((ch, idx) => {
+                const row = document.createElement("div");
+                row.className = "channel-row";
+                row.innerHTML = `
+                    <div class="channel-meta">
+                        <input type="checkbox" class="channel-checkbox" data-idx="${idx}">
+                        <span class="channel-name">${ch.name}</span>
+                    </div>
+                    <select class="channel-select" data-idx="${idx}">
+                        <option value="left">Left</option>
+                        <option value="right">Right</option>
+                    </select>
+                `;
+
+                const checkbox = row.querySelector(".channel-checkbox");
+                const select = row.querySelector(".channel-select");
+
+                checkbox.checked = enabledChannels[idx];
+                select.value = ch.column;
+
+                checkbox.addEventListener("change", (e) => {
+                    if (
+                        e.target.checked &&
+                        getEnabledCount(ch.column) >= 6
+                    ) {
+                        e.target.checked = false;
+                        alert(
+                            "Max 6 channels per column. Disable another channel first."
+                        );
+                        return;
+                    }
+                    enabledChannels[idx] = e.target.checked;
+                    if (totalEvents > 0) drawWaveform();
+                });
+
+                select.addEventListener("change", (e) => {
+                    const prev = ch.column;
+                    const next = e.target.value;
+                    if (
+                        enabledChannels[idx] &&
+                        getEnabledCount(next) >= 6
+                    ) {
+                        e.target.value = prev;
+                        alert(
+                            "Max 6 channels per column. Disable another channel first."
+                        );
+                        return;
+                    }
+                    ch.column = next;
+                    if (totalEvents > 0) drawWaveform();
+                });
+
+                channelTogglesDiv.appendChild(row);
+            });
+        }
+
+        // ------------------------------------------------------------------
+        //  FILE HANDLING & CSV PARSING
+        // ------------------------------------------------------------------
+        function wireUIEvents() {
+            // File input / drag & drop
+            dropZone.addEventListener("click", () => fileInput.click());
+            fileInput.addEventListener("change", handleFile);
+
+            dropZone.addEventListener("dragover", (e) => {
+                e.preventDefault();
+                dropZone.classList.add("dragover");
+            });
+            dropZone.addEventListener("dragleave", () =>
+                dropZone.classList.remove("dragover")
+            );
+            dropZone.addEventListener("drop", (e) => {
+                e.preventDefault();
+                dropZone.classList.remove("dragover");
+                if (e.dataTransfer.files.length) {
+                    handleFile({ target: { files: e.dataTransfer.files } });
+                }
+            });
+
+            // Splitter resizing
+            let isDraggingSplit = false;
+            mainSplitter.addEventListener("mousedown", () => {
+                isDraggingSplit = true;
+                document.body.style.cursor = "row-resize";
+            });
+            window.addEventListener("mouseup", () => {
+                if (!isDraggingSplit) return;
+                isDraggingSplit = false;
+                document.body.style.cursor = "default";
+                resizeCanvas();
+                fitGridToContainer();
+            });
+            window.addEventListener("mousemove", (e) => {
+                if (!isDraggingSplit) return;
+                const totalH = window.innerHeight;
+                let newH = (e.clientY / totalH) * 100;
+                if (newH < 20) newH = 20;
+                if (newH > 80) newH = 80;
+                interfaceContainer.style.height = newH + "%";
+                fitGridToContainer();
+            });
+
+            // Config / toggles
+            btnApplyConfig.addEventListener("click", () => {
+                loadingOverlay.classList.remove("hidden");
+                setTimeout(() => {
+                    applyConfig();
+                    loadingOverlay.classList.add("hidden");
+                }, 20);
+            });
+
+            overwriteBlackToggle.addEventListener("change", (e) => {
+                forceWriteBlack = e.target.checked;
+                if (totalEvents > 0) renderStep(playbackIndex);
+            });
+
+            persistFrameToggle.addEventListener("change", (e) => {
+                persistFrame = e.target.checked;
+            });
+
+            if (fmBrightnessToggle && fmBrightnessLabel) {
+                fmBrightnessToggle.checked = fmUseBrightness;
+
+                const updateBrightnessLabel = () => {
+                    fmBrightnessLabel.textContent = fmUseBrightness
+                        ? "FM6373 Brightness: ON"
+                        : "FM6373 Brightness: OFF";
+                };
+
+                updateBrightnessLabel();
+
+                fmBrightnessToggle.addEventListener("change", () => {
+                    fmUseBrightness = fmBrightnessToggle.checked;
+                    updateBrightnessLabel();
+                    flushGridToDOM(); // repaint with or without per-pixel brightness
+                });
+}
+
+            // Speed & seek sliders
+            speedSlider.addEventListener("input", updateSpeedUI);
+
+            fineSeekSlider.addEventListener("input", (e) => {
+                const val = parseInt(e.target.value, 10);
+                const ratio = (val - 50) / 50;
+                const range = Math.max(getEventsPerSec() * 3, 50);
+                const offset = Math.floor(ratio * range);
+                fineSeekDisplay.textContent =
+                    (offset > 0 ? "+" : "") + offset;
+                let target = fineSeekBaseIndex + offset;
+                if (target < 0) target = 0;
+                if (target >= totalEvents) target = totalEvents - 1;
+                renderStep(target);
+            });
+
+            fineSeekSlider.addEventListener("change", () => {
+                fineSeekBaseIndex = playbackIndex;
+                fineSeekSlider.value = 50;
+                fineSeekDisplay.textContent = "0";
+            });
+
+            // Playback controls
+            btnTogglePlay.onclick = () => setPlayState(!isPlaying);
+
+            scrubber.oninput = (e) => {
+                setPlayState(false);
+                const idx = parseInt(e.target.value, 10);
+                renderStep(idx);
+                fineSeekBaseIndex = idx;
+                fineSeekSlider.value = 50;
+                fineSeekDisplay.textContent = "0";
+            };
+
+            // Waveform canvas events
+            waveCanvas.addEventListener("wheel", (e) => {
+                e.preventDefault();
+                const delta = Math.sign(e.deltaY);
+                if (delta < 0) waveZoom *= 1.2;
+                else waveZoom /= 1.2;
+                if (waveZoom < 0.01) waveZoom = 0.01;
+                if (waveZoom > 50) waveZoom = 50;
+                drawWaveform();
+            });
+
+            waveCanvas.addEventListener("mousedown", (e) => {
+                isPanning = true;
+                lastPanX = e.clientX;
+                panAccumulator = 0;
+                setPlayState(false);
+            });
+            window.addEventListener("mouseup", () => {
+                isPanning = false;
+                panAccumulator = 0;
+            });
+            window.addEventListener("mousemove", (e) => {
+                if (!isPanning) return;
+                const dx = e.clientX - lastPanX;
+                lastPanX = e.clientX;
+                const eventsMoved = dx / waveZoom;
+                panAccumulator += eventsMoved;
+                const whole = Math.trunc(panAccumulator);
+                if (whole !== 0) {
+                    panAccumulator -= whole;
+                    let newIdx = playbackIndex - whole;
+                    if (newIdx < 0) newIdx = 0;
+                    if (newIdx >= totalEvents) newIdx = totalEvents - 1;
+                    renderStep(newIdx);
+                }
+            });
+
+            // Window resize
+            window.addEventListener("resize", () => {
+                resizeCanvas();
+                fitGridToContainer();
+            });
+        }
+
+        function handleFile(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            loadingOverlay.classList.remove("hidden");
+            dropZone.innerHTML = `Parsing <strong>${file.name}</strong>...`;
+
+            setTimeout(() => {
+                const reader = new FileReader();
+                reader.onload = (evt) => {
+                    console.time("parseCSV_total");
+                    try {
+                        parseCSV(evt.target.result);
+                        fileStatus.textContent = "Loaded";
+                    } catch (err) {
+                        console.error("Error during parseCSV:", err);
+                        fileStatus.textContent = "Error (see console)";
+                        alert(
+                            "Error while parsing CSV – check the browser console (F12) for details."
+                        );
+                    } finally {
+                        console.timeEnd("parseCSV_total");
+                        loadingOverlay.classList.add("hidden");
+                    }
+                };
+                reader.readAsText(file);
+            }, 50);
+        }
+
+        /**
+         * Core CSV parser.
+         * Compresses each row into:
+         *   dataTimes[i]  -> float seconds
+         *   dataSignals[i] -> packed bitfield for A/B/.../R0/G0/.../CLK/LAT/OE
+         */
+        function parseCSV(text) {
+            console.time("parseCSV_core");
+
+            const lines = text.split("\n");
+            const validLines = lines.filter((l) => l.trim().length > 0);
+            const count = validLines.length - 1; // skip header
+
+            if (count <= 0) {
+                headersStatus.textContent = "Error: Empty";
+                return;
+            }
+
+            dataTimes = new Float32Array(count);
+            dataSignals = new Uint16Array(count);
+
+            // Default column indexes (used if we can't map headers)
+            let idxTime = 0;
+            let idxA = 1,
+                idxB = 2,
+                idxC = 3,
+                idxD = 4,
+                idxE = 5;
+            let idxR0 = 6,
+                idxG0 = 7,
+                idxB0 = 8,
+                idxR1 = 9,
+                idxG1 = 10,
+                idxB1 = 11;
+            let idxCLK = 12,
+                idxLAT = 13,
+                idxOE = 14;
+
+            const headerLine = validLines[0];
+            const headers = headerLine
+                .split(",")
+                .map((s) => s.trim().toUpperCase());
+
+            let headersFound = false;
+
+            const findIdx = (keys) => {
+                for (const k of keys) {
+                    const i = headers.findIndex(
+                        (h) => h === k || h.startsWith(k + "[")
+                    );
+                    if (i !== -1) return i;
+                }
+                return -1;
+            };
+
+            const t = findIdx(["TIME", "T"]);
+            if (t !== -1) {
+                // Map by header names
+                headersFound = true;
+                idxTime = t;
+
+                const a = findIdx(["A"]);
+                if (a >= 0) idxA = a;
+                const b = findIdx(["B"]);
+                if (b >= 0) idxB = b;
+                const c = findIdx(["C"]);
+                if (c >= 0) idxC = c;
+                const d = findIdx(["D"]);
+                if (d >= 0) idxD = d;
+                const e = findIdx(["E"]);
+                if (e >= 0) idxE = e;
+
+                const r0 = findIdx(["R0", "R1_1"]);
+                if (r0 >= 0) idxR0 = r0;
+                const g0 = findIdx(["G0", "G1_1"]);
+                if (g0 >= 0) idxG0 = g0;
+                const b0 = findIdx(["B0", "B1_1"]);
+                if (b0 >= 0) idxB0 = b0;
+                const r1 = findIdx(["R1", "R2_1"]);
+                if (r1 >= 0) idxR1 = r1;
+                const g1 = findIdx(["G1", "G2_1"]);
+                if (g1 >= 0) idxG1 = g1;
+                const b1 = findIdx(["B1", "B2_1"]);
+                if (b1 >= 0) idxB1 = b1;
+
+                const clk = findIdx(["CLK", "CLOCK"]);
+                if (clk >= 0) idxCLK = clk;
+                const lat = findIdx(["LAT", "LATCH", "LE"]);
+                if (lat >= 0) idxLAT = lat;
+                const oe = findIdx(["OE", "ENABLE"]);
+                if (oe >= 0) idxOE = oe;
+
+                headersStatus.textContent = "OK (Mapped)";
+            } else {
+                headersStatus.textContent = "Fallback (0-14)";
+            }
+
+            // Infer number of pixels per row by counting clocks between latches
+            let maxClocks = 0;
+            let curClocks = 0;
+            let wasLat = false;
+            let writeIdx = 0;
+
+            for (let i = 1; i < validLines.length; i++) {
+                const p = validLines[i].split(",");
+
+                if (p.length < 15 && headersFound) continue;
+                if (p.length < 10 && !headersFound) continue;
+
+                const timeStr = p[idxTime];
+                if (!timeStr) continue;
+
+                dataTimes[writeIdx] = parseFloat(timeStr);
+
+                let sig = 0;
+                const bit = (idx) => p[idx] && p[idx].trim() === "1";
+
+                // Address / generic channels
+                if (bit(idxA)) sig |= 1;
+                if (bit(idxB)) sig |= 1 << 1;
+                if (bit(idxC)) sig |= 1 << 2;
+                if (bit(idxD)) sig |= 1 << 3;
+                if (bit(idxE)) sig |= 1 << 4;
+
+                // Data: R0/G0/B0, R1/G1/B1
+                if (bit(idxR0)) sig |= 1 << 5;
+                if (bit(idxG0)) sig |= 1 << 6;
+                if (bit(idxB0)) sig |= 1 << 7;
+                if (bit(idxR1)) sig |= 1 << 8;
+                if (bit(idxG1)) sig |= 1 << 9;
+                if (bit(idxB1)) sig |= 1 << 10;
+
+                const clk = bit(idxCLK);
+                const lat = bit(idxLAT);
+                const oe = bit(idxOE);
+
+                if (clk) sig |= MASK_CLK;
+                if (lat) sig |= MASK_LAT;
+                if (oe) sig |= MASK_OE;
+
+                dataSignals[writeIdx] = sig;
+
+                // Derive "clocks per latch" for auto width suggestion
+                if (clk) {
+                    if (
+                        writeIdx > 0 &&
+                        !(dataSignals[writeIdx - 1] & MASK_CLK)
+                    ) {
+                        curClocks++;
+                    }
+                }
+
+                if (lat && !wasLat) {
+                    if (curClocks > maxClocks) maxClocks = curClocks;
+                    curClocks = 0;
+                }
+
+                wasLat = lat;
+                writeIdx++;
+            }
+
+            totalEvents = writeIdx;
+            detectedWidthDisplay.textContent = maxClocks;
+
+            // Suggest panel width based on measured clocks
+            if (maxClocks > 120 && maxClocks < 150) widthInput.value = 128;
+            else widthInput.value = maxClocks > 32 ? maxClocks : 64;
+
+            // Lock onto the frame start for FM6373
+            detectFrameStartFromR0();
+
+            dropZone.innerHTML = `Loaded <strong>${totalEvents}</strong> events`;
+            applyConfig();
+
+            // Build FM6373 frame if enabled
+            if (fm6373Mode) {
+                allocFmFrame();
+                buildFm6373FrameFromR0(firstDataIndex);
+            }
+
+            console.timeEnd("parseCSV_core");
+        }
+
+        // ------------------------------------------------------------------
+        //  FM6373: FIND START OF PIXEL DATA
+        // ------------------------------------------------------------------
+        function detectFrameStartFromR0() {
+            firstDataIndex = 0;
+            if (!dataSignals || totalEvents < 2) return;
+
+            let lastAA80EndIdx = -1;
+
+            // Phase 1: scan R0 stream for last 0xAA80 word
+            let active = false;
+            let curWord = 0;
+            let bits = 0;
+
+            for (let i = 1; i < totalEvents; i++) {
+                const prev = dataSignals[i - 1];
+                const cur = dataSignals[i];
+
+                const latPrevHigh = (prev & MASK_LAT) !== 0;
+                const latHigh = (cur & MASK_LAT) !== 0;
+
+                // Start of SPI frame
+                if (!active && latPrevHigh && !latHigh) {
+                    active = true;
+                    curWord = 0;
+                    bits = 0;
+                }
+
+                if (active) {
+                    const clkPrevHigh = (prev & MASK_CLK) !== 0;
+                    const clkHigh = (cur & MASK_CLK) !== 0;
+
+                    if (!clkPrevHigh && clkHigh) {
+                        const bit = (cur >> 5) & 1; // R0
+                        curWord = ((curWord << 1) | bit) & 0xffff;
+                        bits++;
+
+                        if (bits === 16) {
+                            if (curWord === FM6373_LAST_INIT_WORD) {
+                                lastAA80EndIdx = i;
+                            }
+                            bits = 0;
+                            curWord = 0;
+                        }
+                    }
+
+                    if (!latPrevHigh && latHigh) {
+                        active = false;
+                    }
+                }
+            }
+
+            if (lastAA80EndIdx === -1) {
+                console.warn(
+                    "FM6373: Init sequence 0xAA80 not found. Starting at 0."
+                );
+                return;
+            }
+
+            console.log(
+                `FM6373: Last 0xAA80 ended at event ${lastAA80EndIdx}. Syncing to next LAT pulse...`
+            );
+
+            // Phase 2: From the end of init sequence, sync to LAT hi->lo->first CLK
+            let state = 0; // 0=wait LAT high, 1=wait LAT low, 2=wait first CLK
+
+            for (let i = lastAA80EndIdx; i < totalEvents; i++) {
+                const prev = dataSignals[i - 1];
+                const cur = dataSignals[i];
+
+                const latHigh = (cur & MASK_LAT) !== 0;
+                const clkPrevHigh = (prev & MASK_CLK) !== 0;
+                const clkHigh = (cur & MASK_CLK) !== 0;
+
+                if (state === 0) {
+                    if (latHigh) state = 1;
+                } else if (state === 1) {
+                    if (!latHigh) state = 2;
+                } else if (state === 2) {
+                    if (!clkPrevHigh && clkHigh) {
+                        firstDataIndex = i;
+                        console.log(
+                            `%cFM6373: Frame Sync Locked at event ${firstDataIndex}`,
+                            "color:#0f0;font-weight:bold;"
+                        );
+                        return;
+                    }
+                }
+            }
+
+            console.warn(
+                "FM6373: Could not find valid data stream after Init."
+            );
+        }
+
+        // ------------------------------------------------------------------
+        //  FM6373: BUILD FRAME BUFFERS FROM R0/R1 STREAM
+        // ------------------------------------------------------------------
+        function buildFm6373FrameFromR0(startIdx = 0) {
+            if (!fm6373Mode || !dataSignals) return;
+
+            console.time("FM6373 Decode");
+            console.clear();
+            console.log(
+                "%c FM6373 DECODE STARTED ",
+                "background: blue; color: white"
+            );
+
+            const w = PANEL_WIDTH;
+            const h = PANEL_HEIGHT;
+            const totalPixels = w * h;
+
+            if (!fmFrameR || fmFrameR.length !== totalPixels) {
+                allocFmFrame();
+            }
+
+            fmFrameR.fill(0);
+            if (fmFrameG) fmFrameG.fill(0);
+            if (fmFrameB) fmFrameB.fill(0);
+            fmPixelEvent.fill(-1);
+            fmPixelRawWord.fill(0);
+
+            const BLOCKS_PER_ROW = 16;
+            const WORDS_PER_BLOCK = 8;
+            const STRIDE = 16;
+
+            let curWord0 = 0;
+            let curWord1 = 0;
+            let bits = 0;
+            let wordCounter = 0;
+            let waitingForBlockSync = false;
+            let syncStep = 0;
+
+            // Always keep the raw 0–255 level in the frame buffer.
+            // The UI toggle only changes how we *display* it.
+            const toBrightness8 = (raw8) => raw8;
+
+            for (let i = startIdx; i < totalEvents; i++) {
+                const prev = i === 0 ? 0 : dataSignals[i - 1];
+                const cur = dataSignals[i];
+
+                const clkPrevHigh = (prev & MASK_CLK) !== 0;
+                const clkHigh = (cur & MASK_CLK) !== 0;
+                const latHigh = (cur & MASK_LAT) !== 0;
+
+                // Wait for LAT to go high then low between blocks
+                if (waitingForBlockSync) {
+                    if (syncStep === 0 && latHigh) syncStep = 1;
+                    else if (syncStep === 1 && !latHigh) {
+                        waitingForBlockSync = false;
+                        syncStep = 0;
+                    }
+                    continue;
+                }
+
+                // Clock rising edge
+                if (i === startIdx || (!clkPrevHigh && clkHigh)) {
+                    const bit0 = (cur >> 5) & 1; // R0
+                    const bit1 = (cur >> 8) & 1; // R1
+
+                    curWord0 = ((curWord0 << 1) | bit0) & 0xffff;
+                    curWord1 = ((curWord1 << 1) | bit1) & 0xffff;
+                    bits++;
+
+                    if (bits === 16) {
+                        const rowScanIdx = Math.floor(wordCounter / 128);
+                        const indexInRow = wordCounter % 128;
+                        const blockIdx = Math.floor(
+                            indexInRow / WORDS_PER_BLOCK
+                        );
+                        const wordInBlock = indexInRow % WORDS_PER_BLOCK;
+
+                        const storePixel = (val16, yOffset) => {
+                            const y = rowScanIdx + yOffset;
+                            if (y >= h) return;
+
+                            const hi = (val16 >> 8) & 0xff;
+                            const lo = val16 & 0xff;
+
+                            // Base 8‑bit value for "normal" columns (0..111)
+                            let raw8 = hi;
+                            if (raw8 === 0 && lo !== 0) {
+                                raw8 = lo;
+                            }
+
+                            // 0..111 columns (words 1..7 of each block)
+                            if (wordInBlock > 0) {
+                                const pixelGroupIdx = wordInBlock - 1;
+                                const x =
+                                    blockIdx + pixelGroupIdx * STRIDE;
+                                if (x < w && x < 112) {
+                                    const idx = y * w + x;
+                                    fmFrameR[idx] = toBrightness8(raw8);
+                                    fmPixelEvent[idx] = i;
+                                    fmPixelRawWord[idx] = val16;
+                                }
+                            }
+
+                            // Extra column (112..127) from last word in block
+                            // Extra column (112..127) from last word in block
+                            if (wordInBlock === 7) {
+                                const xExtra = blockIdx + 112;
+                                if (xExtra < w) {
+                                    const idx = y * w + xExtra;
+
+                                    // Start from the same 8‑bit level we use for the "normal"
+                                    // columns in this word (high byte, or low byte if high is 0).
+                                    let raw8Extra = raw8;
+
+                                    // Optional 4‑bit brightness override in low nibble.
+                                    // Sometimes this nibble is 0 even though the high byte
+                                    // carries a real brightness value, so we *only* replace
+                                    // the 8‑bit level when the nibble is non‑zero.
+                                    const loByte = lo;
+                                    let raw4 = loByte & 0x0f;
+                                    if (raw4 !== 0) {
+                                        // Map 0..15 → 0..255
+                                        raw8Extra = Math.round((raw4 * 255) / 15);
+                                    }
+
+                                    fmFrameR[idx] = raw8Extra;
+                                    fmPixelEvent[idx] = i;
+                                    fmPixelRawWord[idx] = val16;
+                                }
+                            }
+                        };
+
+                        // Top / bottom half (R0/R1)
+                        storePixel(curWord0, 0);
+                        storePixel(curWord1, 32);
+
+                        wordCounter++;
+                        curWord0 = 0;
+                        curWord1 = 0;
+                        bits = 0;
+
+                        // After each block, wait for LAT hi→lo before next
+                        if (wordCounter % WORDS_PER_BLOCK === 0) {
+                            waitingForBlockSync = true;
+                            syncStep = latHigh ? 1 : 0;
+                        }
+
+                        // Only decode one full 1/32 scan
+                        if (rowScanIdx >= MAX_SCAN_ROWS) {
+                            console.log(
+                                `%c Frame Lock: Stop at Row ${rowScanIdx}`,
+                                "color:orange"
+                            );
+                            break;
+                        }
+                    }
+                }
+            }
+
+            console.timeEnd("FM6373 Decode");
+        }
+
+        // ------------------------------------------------------------------
+        //  PANEL CONFIG APPLY / RESIZING
+        // ------------------------------------------------------------------
+        function applyConfig() {
+            const w = parseInt(widthInput.value, 10);
+            const h = parseInt(heightInput.value, 10);
+
+            if (w > 0 && h > 0) {
+                PANEL_WIDTH = w;
+                PANEL_HEIGHT = h;
+
+                initGrid(PANEL_WIDTH, PANEL_HEIGHT);
+
+                if (totalEvents > 0) {
+                    generateKeyframes();
+                    setupPlayback();
+                }
+
+                fitGridToContainer();
+            }
+        }
+
+        // ------------------------------------------------------------------
+        //  WAVEFORM RENDERING
+        // ------------------------------------------------------------------
+        function resizeCanvas() {
+            const parent = waveCanvas.parentElement;
+            waveCanvas.width = parent.clientWidth;
+            waveCanvas.height = parent.clientHeight;
+            if (totalEvents > 0) drawWaveform();
+        }
+
+        function drawWaveform() {
+            const ctx = waveCanvas.getContext("2d");
+            const w = waveCanvas.width;
+            const h = waveCanvas.height;
+
+            ctx.fillStyle = "#020617";
+            ctx.fillRect(0, 0, w, h);
+
+            const centerIdx = playbackIndex;
+            const activeChannels = WAVE_CHANNELS.filter(
+                (ch, i) => enabledChannels[i]
+            );
+            const leftChannels = activeChannels.filter(
+                (ch) => ch.column === "left"
+            );
+            const rightChannels = activeChannels.filter(
+                (ch) => ch.column === "right"
+            );
+            const columns = [];
+            if (leftChannels.length) columns.push(leftChannels);
+            if (rightChannels.length) columns.push(rightChannels);
+
+            const colWidth =
+                columns.length > 0 ? w / columns.length : w;
+            const range = Math.ceil(colWidth / waveZoom);
+            const startIdx = Math.floor(centerIdx - range / 2);
+            const endIdx = Math.ceil(centerIdx + range / 2);
+
+            const drawColumn = (channels, offsetX, width) => {
+                if (!channels.length) return;
+
+                // vertical separator between left/right columns
+                if (offsetX > 0) {
+                    ctx.strokeStyle = "#334155";
+                    ctx.lineWidth = 1;
+                    ctx.beginPath();
+                    ctx.moveTo(offsetX, 0);
+                    ctx.lineTo(offsetX, h);
+                    ctx.stroke();
+                }
+
+                // background grid lines
+                const gridStep =
+                    waveZoom > 10 ? 10 : waveZoom > 1 ? 100 : 1000;
+                ctx.strokeStyle = "#1e293b";
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                const gridStart =
+                    Math.floor(startIdx / gridStep) * gridStep;
+                for (let i = gridStart; i <= endIdx; i += gridStep) {
+                    const x = (i - startIdx) * waveZoom + offsetX;
+                    if (x >= offsetX && x < offsetX + width) {
+                        ctx.moveTo(x, 0);
+                        ctx.lineTo(x, h);
+                    }
+                }
+                ctx.stroke();
+
+                // center index marker
+                const centerX = (centerIdx - startIdx) * waveZoom + offsetX;
+                if (centerX >= offsetX && centerX < offsetX + width) {
+                    ctx.strokeStyle = "#f59e0b";
+                    ctx.lineWidth = 2;
+                    ctx.beginPath();
+                    ctx.moveTo(centerX, 0);
+                    ctx.lineTo(centerX, h);
+                    ctx.stroke();
+                }
+
+                const chHeight = h / channels.length;
+
+                channels.forEach((ch, i) => {
+                    const yBase = i * chHeight + 2;
+                    const yH = chHeight - 4;
+                    const yLow = yBase + yH;
+                    const yHigh = yBase;
+
+                    ctx.strokeStyle = ch.color;
+                    ctx.lineWidth = 1.5;
+                    ctx.beginPath();
+
+                    const s = Math.max(0, startIdx);
+                    const e = Math.min(totalEvents - 1, endIdx);
+                    let prevVal = -1;
+
+                    for (let k = s; k <= e; k++) {
+                        const sig = dataSignals[k];
+                        let val = (sig & ch.mask) ? 1 : 0;
+                        if (ch.inv) val = val ? 0 : 1;
+
+                        const x = (k - startIdx) * waveZoom + offsetX;
+                        if (k === s) {
+                            ctx.moveTo(x, val ? yHigh : yLow);
+                        } else if (val !== prevVal) {
+                            ctx.lineTo(x, prevVal ? yHigh : yLow);
+                            ctx.lineTo(x, val ? yHigh : yLow);
+                        }
+                        prevVal = val;
+                    }
+
+                    const lastX = (e - startIdx) * waveZoom + offsetX;
+                    ctx.lineTo(lastX + waveZoom, prevVal ? yHigh : yLow);
+                    ctx.stroke();
+
+                    ctx.fillStyle = "#94a3b8";
+                    ctx.font = "10px monospace";
+                    ctx.fillText(ch.name, offsetX + 4, yBase + yH - 2);
+                });
+            };
+
+            columns.forEach((col, idx) =>
+                drawColumn(col, idx * colWidth, colWidth)
+            );
+        }
+
+        // ------------------------------------------------------------------
+        //  FM6373 → GRID (draw decoded rows into vmGridState)
+        // ------------------------------------------------------------------
+        function drawFmRowToGrid(rowIdx) {
+            if (!fm6373Mode || !fmFrameR) return;
+
+            const scanOffset = 32; // 1/32 scan pairing
+
+            const updateRow = (r) => {
+                if (r < 0 || r >= PANEL_HEIGHT) return;
+                const rowStart = r * PANEL_WIDTH;
+
+                if (window.debugRow === r) {
+                    console.log(
+                        `Drawing Row ${r}. First 10 vals:`,
+                        fmFrameR.slice(rowStart, rowStart + 10)
+                    );
+                }
+
+                for (let x = 0; x < PANEL_WIDTH; x++) {
+                    const idx = rowStart + x;
+                    const val = fmFrameR[idx];
+                    // binary presence bit for red channel
+                    vmGridState[idx] = val > 0 ? 1 : 0;
+                }
+            };
+
+            updateRow(rowIdx);
+            updateRow(rowIdx + scanOffset);
+        }
+
+        // ------------------------------------------------------------------
+        //  GENERIC PANEL DRAW HELPERS (non-FM6373 path)
+        // ------------------------------------------------------------------
+        function drawBufferToGrid(rowIdx, buffer) {
+            if (rowIdx >= PANEL_HEIGHT) return;
+            const rowOffset = rowIdx * PANEL_WIDTH;
+            const len = buffer.length;
+
+            for (let i = 0; i < len; i++) {
+                const x = len - 1 - i;
+                if (x >= PANEL_WIDTH) continue;
+                const color = buffer[i];
+                if (forceWriteBlack || color !== 0) {
+                    vmGridState[rowOffset + x] = color;
+                }
+            }
+        }
+
+        function flushGridToDOM() {
+            const useFmBrightness = fm6373Mode && fmFrameR && fmUseBrightness;
+
+            for (let i = 0; i < vmGridState.length; i++) {
+                const newVal = vmGridState[i];
+
+                // update RGB class only when value changes
+                if (newVal !== domGridState[i]) {
+                    const px = pixelElements[i];
+                    let c = "pixel";
+                    if (newVal & 1) c += " active-r";
+                    if (newVal & 2) c += " active-g";
+                    if (newVal & 4) c += " active-b";
+                    if (newVal === 3) c += " active-rg";
+                    else if (newVal === 5) c += " active-rb";
+                    else if (newVal === 6) c += " active-gb";
+                    else if (newVal === 7) c += " active-rgb";
+                    px.className = c;
+                    domGridState[i] = newVal;
+                }
+
+                // apply per-pixel brightness as opacity when FM6373 is active
+                if (useFmBrightness) {
+                    const b = fmFrameR[i] || 0;
+                    const alpha = b / 255;
+                    pixelElements[i].style.opacity = alpha;
+                } else {
+                    // Brightness disabled -> full opacity for any “on” pixel
+                    pixelElements[i].style.opacity = '';
+                }
+            }
+        }
+
+        // ------------------------------------------------------------------
+        //  KEYFRAMES + VIRTUAL MACHINE (ADDRESS / LATCH PROCESSING)
+        // ------------------------------------------------------------------
+        function resetVM() {
+            vmAddress = 0;
+            vmBuffer0 = [];
+            vmBuffer1 = [];
+
+            if (!persistFrame) {
+                vmGridState.fill(0);
+            }
+
+            // Force next flush to update all pixels
+            domGridState.fill(255);
+        }
+
+        function restoreKeyframe(kf) {
+            vmAddress = kf.address;
+            vmBuffer0 = [...kf.buffer0];
+            vmBuffer1 = [...kf.buffer1];
+
+            if (!persistFrame) {
+                vmGridState.set(kf.gridState);
+            }
+        }
+
+        function processSingleStep(idx, updateGrid) {
+            const sig = dataSignals[idx];
+            const addr = sig & MASK_ADDR;
+            if (addr !== vmAddress) vmAddress = addr;
+
+            const clk = sig & MASK_CLK;
+            const prevSig = idx > 0 ? dataSignals[idx - 1] : 0;
+            const prevClk = prevSig & MASK_CLK;
+
+            // Original buffer capture path (used when fm6373Mode is false)
+            if (!fm6373Mode && clk && !prevClk) {
+                const c0 = (sig >> 5) & 0x07;
+                const c1 = (sig >> 8) & 0x07;
+                vmBuffer0.push(c0);
+                vmBuffer1.push(c1);
+                if (vmBuffer0.length > PANEL_WIDTH) vmBuffer0.shift();
+                if (vmBuffer1.length > PANEL_WIDTH) vmBuffer1.shift();
+            }
+
+            // Apply to grid on OE low (panel actually displaying this row)
+            // Apply to grid on OE LOW (panel actually displaying this row)
+            if (updateGrid && !(sig & MASK_OE)) {   // FM6373: OE is active-LOW
+                if (fm6373Mode) {
+                    if (vmAddress < PANEL_HEIGHT) {
+                        drawFmRowToGrid(vmAddress);
+                    }
+                } else {
+                    const halfHeight = Math.floor(PANEL_HEIGHT / 2);
+                    if (vmAddress < halfHeight) {
+                        drawBufferToGrid(vmAddress, vmBuffer0);
+                        drawBufferToGrid(vmAddress + halfHeight, vmBuffer1);
+                    }
+                }
+            }
+        }
+
+        function generateKeyframes() {
+            console.time("generateKeyframes");
+            keyframes = [];
+            resetVM();
+
+            const start = firstDataIndex || 0;
+
+            for (let i = start; i < totalEvents; i++) {
+                if ((i - start) % KEYFRAME_INTERVAL === 0) {
+                    keyframes.push({
+                        index: i,
+                        address: vmAddress,
+                        buffer0: [...vmBuffer0],
+                        buffer1: [...vmBuffer1],
+                        gridState: new Uint8Array(vmGridState)
+                    });
+                }
+                processSingleStep(i, false);
+            }
+
+            console.timeEnd("generateKeyframes");
+        }
+
+        // ------------------------------------------------------------------
+        //  PLAYBACK / SCRUB / SPEED
+        // ------------------------------------------------------------------
+        function getEventsPerSec() {
+            const coarseVal = parseInt(speedSlider.value, 10);
+            // Map slider [0..100] to approx 10^0 .. 10^7 events/s
+            return Math.pow(10, (coarseVal / 100) * 7);
+        }
+
+        function formatSpeed(eps) {
+            if (eps === 0) return "0 Evt/s";
+            if (eps >= 1_000_000)
+                return (eps / 1_000_000).toFixed(2) + " MEvt/s";
+            if (eps >= 1_000) return (eps / 1_000).toFixed(2) + " kEvt/s";
+            return eps.toFixed(2) + " Evt/s";
+        }
+
+        function updateSpeedUI() {
+            speedDisplay.textContent = formatSpeed(getEventsPerSec());
+        }
+
+        function setupPlayback() {
+            resizeCanvas();
+
+            scrubber.min = firstDataIndex;
+            scrubber.max = totalEvents - 1;
+            scrubber.disabled = false;
+
+            btnTogglePlay.disabled = false;
+
+            totalVal.textContent = totalEvents;
+            updateSpeedUI();
+
+            renderStep(firstDataIndex);
+        }
+
+        function setPlayState(play) {
+            isPlaying = play;
+
+            if (isPlaying) {
+                lastFrameTime = 0;
+                fineSeekSlider.disabled = true;
+                btnTogglePlay.textContent = "PAUSE";
+                btnTogglePlay.classList.remove(
+                    "bg-green-600",
+                    "hover:bg-green-500"
+                );
+                btnTogglePlay.classList.add(
+                    "bg-yellow-600",
+                    "hover:bg-yellow-500"
+                );
+                loop(performance.now());
+            } else {
+                fineSeekSlider.disabled = false;
+                fineSeekBaseIndex = playbackIndex;
+                fineSeekSlider.value = 50;
+                fineSeekDisplay.textContent = "0";
+                btnTogglePlay.textContent = "PLAY";
+                btnTogglePlay.classList.remove(
+                    "bg-yellow-600",
+                    "hover:bg-yellow-500"
+                );
+                btnTogglePlay.classList.add(
+                    "bg-green-600",
+                    "hover:bg-green-500"
+                );
+            }
+        }
+
+        function loop(timestamp) {
+            if (!isPlaying) return;
+            if (!lastFrameTime) lastFrameTime = timestamp;
+
+            const dt = timestamp - lastFrameTime;
+            lastFrameTime = timestamp;
+
+            const eps = getEventsPerSec();
+            const eventsToAdd = (eps * dt) / 1000;
+            playbackAccumulator += eventsToAdd;
+
+            if (playbackAccumulator >= 1) {
+                const steps = Math.floor(playbackAccumulator);
+                playbackAccumulator -= steps;
+                let next = playbackIndex + steps;
+                if (next >= totalEvents) {
+                    next = totalEvents - 1;
+                    setPlayState(false);
+                } else {
+                    renderStep(next);
+                    fineSeekBaseIndex = next;
+                }
+            } else {
+                updateSignalUI(playbackIndex);
+            }
+
+            if (isPlaying) requestAnimationFrame(loop);
+        }
+
+        // ------------------------------------------------------------------
+        //  RENDER A SPECIFIC EVENT INDEX
+        // ------------------------------------------------------------------
+        function renderStep(targetIdx) {
+            if (targetIdx < firstDataIndex) targetIdx = firstDataIndex;
+
+            scrubber.value = targetIdx;
+            scrubVal.textContent = targetIdx;
+
+            // Pick nearest keyframe before target
+            let kf = null;
+            for (let i = 0; i < keyframes.length; i++) {
+                if (keyframes[i].index <= targetIdx) kf = keyframes[i];
+                else break;
+            }
+
+            let startIdx;
+            if (kf) {
+                restoreKeyframe(kf);
+                startIdx = kf.index;
+            } else {
+                resetVM();
+                startIdx = firstDataIndex;
+            }
+
+            let latCaught = false;
+            const checkStart = Math.max(startIdx, playbackIndex + 1);
+
+            for (let i = startIdx; i <= targetIdx; i++) {
+                processSingleStep(i, true);
+                if (i >= checkStart && (dataSignals[i] & MASK_LAT)) {
+                    latCaught = true;
+                }
+            }
+
+            if (latCaught) {
+                latPulseUntil = performance.now() + 100;
+            }
+
+            flushGridToDOM();
+            updateSignalUI(targetIdx, latCaught);
+            updateDebugLog(targetIdx);
+
+            playbackIndex = targetIdx;
+
+            if (waveCanvas.width > 0) drawWaveform();
+        }
+
+        // ------------------------------------------------------------------
+        //  SIGNAL / DEBUG PANEL
+        // ------------------------------------------------------------------
+        function updateSignalUI(idx) {
+            const sig = dataSignals[idx];
+
+            elTime.textContent = dataTimes[idx].toFixed(8) + "s";
+
+            const isOE = !(sig & MASK_OE);
+            elSigOE.textContent = isOE ? "LO (OFF)" : "HI (ON)";
+            elSigOE.className = isOE ? "sig-lo" : "sig-hi";
+
+            const isLatBit = (sig & MASK_LAT) !== 0;
+            const isLat = isLatBit || performance.now() < latPulseUntil;
+            elSigLAT.textContent = isLat ? "HI" : "LO";
+            elSigLAT.className = isLat ? "sig-hi" : "sig-lo";
+
+            const isClk = sig & MASK_CLK;
+            elSigCLK.textContent = isClk ? "HI" : "LO";
+            elSigCLK.className = isClk ? "sig-hi" : "sig-lo";
+
+            const addr = sig & MASK_ADDR;
+            const halfHeight = Math.floor(PANEL_HEIGHT / 2);
+            elAddr.textContent = addr;
+            elScan.textContent = `Row ${addr} & ${addr + halfHeight}`;
+            elShift.textContent = vmBuffer0.length;
+        }
+
+        function jumpToEvent(idx) {
+            scrubber.value = idx;
+            scrubber.dispatchEvent(new Event("input"));
+        }
+        window.jumpToEvent = jumpToEvent; // used by debug-row onclick
+
+        function updateDebugLog(centerIdx) {
+            const start = Math.max(0, centerIdx - 30);
+            const end = Math.min(totalEvents - 1, centerIdx + 30);
+            let html = "";
+
+            for (let i = start; i <= end; i++) {
+                const sig = dataSignals[i];
+                const active = i === centerIdx;
+
+                const addr = sig & MASK_ADDR;
+                const r0 = (sig >> 5) & 1;
+                const g0 = (sig >> 6) & 1;
+                const b0 = (sig >> 7) & 1;
+                const r1 = (sig >> 8) & 1;
+                const g1 = (sig >> 9) & 1;
+                const b1 = (sig >> 10) & 1;
+
+                const c = sig & MASK_CLK ? "1" : "0";
+                const l = sig & MASK_LAT ? "1" : "0";
+                const o = !(sig & MASK_OE) ? "0" : "1";
+
+                const cClass = sig & MASK_CLK ? "sig-clk-on" : "sig-off";
+                const lClass = sig & MASK_LAT ? "sig-lat-on" : "sig-off";
+
+                const oVisual =
+                    !(sig & MASK_OE)
+                        ? '<span class="sig-oe-on">L</span>'
+                        : '<span class="sig-off">H</span>';
+
+                const rowId = active ? "debug-active-row" : "";
+
+                html += `
+                <div id="${rowId}" class="debug-row ${
+                    active ? "active" : ""
+                }" onclick="jumpToEvent(${i})">
+                    <div class="d-idx">${i}</div>
+                    <div class="d-addr">${addr}</div>
+                    <div class="d-data">
+                        <span class="${r0 ? "sig-on" : "sig-off"}">${r0}</span><span class="${
+                    g0 ? "sig-on" : "sig-off"
+                }">${g0}</span><span class="${
+                    b0 ? "sig-on" : "sig-off"
+                }">${b0}</span>
+                        <span class="${r1 ? "sig-on" : "sig-off"}">${r1}</span><span class="${
+                    g1 ? "sig-on" : "sig-off"
+                }">${g1}</span><span class="${
+                    b1 ? "sig-on" : "sig-off"
+                }">${b1}</span>
+                    </div>
+                    <div class="d-sig ${cClass}">${c}</div>
+                    <div class="d-sig ${lClass}">${l}</div>
+                    <div class="d-sig">${oVisual}</div>
+                </div>`;
+            }
+
+            debugList.innerHTML = html;
+            const activeEl = document.getElementById("debug-active-row");
+            if (activeEl) {
+                activeEl.scrollIntoView({ block: "center", behavior: "auto" });
+            }
+        }
+
+        // ------------------------------------------------------------------
+        //  BOOTSTRAP
+        // ------------------------------------------------------------------
+        init();
+    </script>
+</body>
+</html>
