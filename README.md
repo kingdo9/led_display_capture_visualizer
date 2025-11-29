@@ -1,5 +1,3 @@
-# led_display_capture_visualizer
-
 Test concept to create an image from a raw logic capture from an FM6373 + DP32019B LED display<br /><br />
 
 Logic captures from KingST analyzer, exported to CSV.

@@ -750,6 +750,12 @@
         let fmPixelEvent = null; // event index that wrote this pixel
         let fmPixelRawWord = null; // raw 16-bit word that produced the pixel
 
+        // LAT / word level metadata for FM6373 decoding
+        let fmLatPulses = [];     // all LAT pulses with CLK-count info
+        let fmRgbRows = [];       // grouped 1-CLK LAT pulses -> [ [16 pulses] per row ]
+        let bitEvents = [];       // every CLK rising edge with R0/R1 bits
+        let bitIndexBySample = null; // Map: sampleIndex -> index in bitEvents
+
         // ------------------------------------------------------------------
         //  DOM ELEMENT REFERENCES
         // ------------------------------------------------------------------
@@ -1412,111 +1418,227 @@
             console.timeEnd("parseCSV_core");
         }
 
-        // ------------------------------------------------------------------
-        //  FM6373: FIND START OF PIXEL DATA
-        // ------------------------------------------------------------------
-        function detectFrameStartFromR0() {
-            firstDataIndex = 0;
+        /**
+         * Scan the capture for LAT pulses and count how many CLK rising edges
+         * occur while LAT is high.
+         *
+         * Each pulse: { startIndex, endIndex, clkEdges, clkSampleIndex }
+         *   - clkSampleIndex is the sample index of the *last* CLK rising edge
+         *     that happens while LAT is high (for 1-CLK pulses that's the one
+         *     clock in the pulse).
+         */
+        function scanLatPulses() {
+            fmLatPulses = [];
             if (!dataSignals || totalEvents < 2) return;
 
-            let lastAA80EndIdx = -1;
-
-            // Phase 1: scan R0 stream for last 0xAA80 word
-            let active = false;
-            let curWord = 0;
-            let bits = 0;
+            let inPulse = false;
+            let startIdx = 0;
+            let clkEdges = 0;
+            let lastClkSample = -1;
 
             for (let i = 1; i < totalEvents; i++) {
                 const prev = dataSignals[i - 1];
                 const cur = dataSignals[i];
 
-                const latPrevHigh = (prev & MASK_LAT) !== 0;
-                const latHigh = (cur & MASK_LAT) !== 0;
+                const latPrev = (prev & MASK_LAT) !== 0;
+                const latCur  = (cur  & MASK_LAT) !== 0;
+                const clkPrev = (prev & MASK_CLK) !== 0;
+                const clkCur  = (cur  & MASK_CLK) !== 0;
 
-                // Start of SPI frame
-                if (!active && latPrevHigh && !latHigh) {
-                    active = true;
-                    curWord = 0;
-                    bits = 0;
+                // LAT rising edge -> start of pulse
+                if (!inPulse && !latPrev && latCur) {
+                    inPulse = true;
+                    startIdx = i;
+                    clkEdges = 0;
+                    lastClkSample = -1;
                 }
 
-                if (active) {
-                    const clkPrevHigh = (prev & MASK_CLK) !== 0;
-                    const clkHigh = (cur & MASK_CLK) !== 0;
+                if (!inPulse) continue;
 
-                    if (!clkPrevHigh && clkHigh) {
-                        const bit = (cur >> 5) & 1; // R0
-                        curWord = ((curWord << 1) | bit) & 0xffff;
-                        bits++;
+                // Count CLK rising edges while LAT is high
+                if (!clkPrev && clkCur) {
+                    clkEdges++;
+                    lastClkSample = i;
+                }
 
-                        if (bits === 16) {
-                            if (curWord === FM6373_LAST_INIT_WORD) {
-                                lastAA80EndIdx = i;
-                            }
-                            bits = 0;
-                            curWord = 0;
-                        }
-                    }
+                // LAT falling edge -> end of pulse
+                if (latPrev && !latCur) {
+                    fmLatPulses.push({
+                        startIndex: startIdx,
+                        endIndex: i,
+                        clkEdges,
+                        clkSampleIndex: lastClkSample
+                    });
+                    inPulse = false;
+                }
+            }
+        }
 
-                    if (!latPrevHigh && latHigh) {
-                        active = false;
-                    }
+
+        /**
+         * Collect a flat list of bit events for R0/R1.
+         * One entry per CLK rising edge (LAT low *or* high).
+         *
+         * bitEvents = [{ sampleIndex, bitR0, bitR1 }, ...]
+         */
+        function buildBitEventsFromR0R1() {
+            bitEvents = [];
+            bitIndexBySample = new Map();
+            if (!dataSignals || totalEvents < 2) return;
+
+            for (let i = 1; i < totalEvents; i++) {
+                const prev = dataSignals[i - 1];
+                const cur  = dataSignals[i];
+
+                const clkPrevHigh = (prev & MASK_CLK) !== 0;
+                const clkHigh     = (cur  & MASK_CLK) !== 0;
+
+                // Take *every* CLK rising edge: LAT low or high
+                if (!clkPrevHigh && clkHigh) {
+                    const bitR0 = (cur >> 5) & 1; // R0
+                    const bitR1 = (cur >> 8) & 1; // R1
+                    const idx = bitEvents.length;
+                    bitEvents.push({
+                        sampleIndex: i,
+                        bitR0,
+                        bitR1
+                    });
+                    bitIndexBySample.set(i, idx);
                 }
             }
 
-            if (lastAA80EndIdx === -1) {
-                console.warn(
-                    "FM6373: Init sequence 0xAA80 not found. Starting at 0."
-                );
+            console.log(
+                `FM6373: collected ${bitEvents.length} bit events from R0/R1 (all CLK rising edges)`
+            );
+        }
+
+
+        
+        // ------------------------------------------------------------------
+        //  FM6373: FIND START OF PIXEL DATA (LAT-based, no 0xAA80)
+        // ------------------------------------------------------------------
+        function detectFrameStartFromR0() {
+            firstDataIndex = 0;
+            fmRgbRows = [];
+
+            if (!dataSignals || totalEvents < 2) return;
+
+            // 1) Collect all LAT pulses with CLK-edge counts
+            scanLatPulses();
+            if (!fmLatPulses.length) {
+                console.warn("FM6373: No LAT pulses found, cannot sync.");
                 return;
             }
 
             console.log(
-                `FM6373: Last 0xAA80 ended at event ${lastAA80EndIdx}. Syncing to next LAT pulse...`
+                "FM6373: LAT pulses (index, CLK edges):",
+                fmLatPulses.map((p, i) => ({
+                    i,
+                    clkEdges: p.clkEdges,
+                    start: p.startIndex,
+                    end: p.endIndex
+                }))
             );
 
-            // Phase 2: From the end of init sequence, sync to LAT hi->lo->first CLK
-            let state = 0; // 0=wait LAT high, 1=wait LAT low, 2=wait first CLK
-
-            for (let i = lastAA80EndIdx; i < totalEvents; i++) {
-                const prev = dataSignals[i - 1];
-                const cur = dataSignals[i];
-
-                const latHigh = (cur & MASK_LAT) !== 0;
-                const clkPrevHigh = (prev & MASK_CLK) !== 0;
-                const clkHigh = (cur & MASK_CLK) !== 0;
-
-                if (state === 0) {
-                    if (latHigh) state = 1;
-                } else if (state === 1) {
-                    if (!latHigh) state = 2;
-                } else if (state === 2) {
-                    if (!clkPrevHigh && clkHigh) {
-                        firstDataIndex = i;
-                        console.log(
-                            `%cFM6373: Frame Sync Locked at event ${firstDataIndex}`,
-                            "color:#0f0;font-weight:bold;"
-                        );
-                        return;
+            // 2) Find the 5 config-register pulses: LAT high for 5 CLK edges
+            //    Skip the first 3 pulses (initialisation), then look for 5× "5-CLK" pulses.
+            let cfgStartPulseIdx = -1;
+            const searchFrom = Math.min(3, fmLatPulses.length); // first 3 are init
+            for (let i = searchFrom; i <= fmLatPulses.length - 5; i++) {
+                let ok = true;
+                for (let j = 0; j < 5; j++) {
+                    if (fmLatPulses[i + j].clkEdges !== 5) {
+                        ok = false;
+                        break;
                     }
+                }
+                if (ok) {
+                    cfgStartPulseIdx = i;
+                    break;
                 }
             }
 
-            console.warn(
-                "FM6373: Could not find valid data stream after Init."
+            if (cfgStartPulseIdx === -1) {
+                console.warn(
+                    "FM6373: 5×5-CLK config LAT pattern not found. Keeping firstDataIndex = 0."
+                );
+                return;
+            }
+
+            const lastCfgPulse = fmLatPulses[cfgStartPulseIdx + 4];
+
+            console.log(
+                `FM6373: Config pulses at LAT indices ${cfgStartPulseIdx}..${
+                    cfgStartPulseIdx + 4
+                } (events ${lastCfgPulse.startIndex}..${lastCfgPulse.endIndex})`
+            );
+
+            // 3) All 1-CLK pulses after the config region are RGB block latches
+            const rgbCandidates = [];
+            for (let i = cfgStartPulseIdx + 5; i < fmLatPulses.length; i++) {
+                const p = fmLatPulses[i];
+                if (p.startIndex <= lastCfgPulse.endIndex) continue;
+                if (p.clkEdges === 1) rgbCandidates.push(p);
+            }
+
+            if (!rgbCandidates.length) {
+                console.warn(
+                    "FM6373: No 1-CLK LAT pulses found after config region."
+                );
+                return;
+            }
+
+            // 4) Group 1-CLK pulses into rows: 16 blocks per row
+            fmRgbRows = [];
+            for (let i = 0; i < rgbCandidates.length; i += 16) {
+                const rowSlice = rgbCandidates.slice(i, i + 16);
+                if (rowSlice.length < 16) break; // incomplete final row
+                fmRgbRows.push(rowSlice);
+            }
+
+            if (!fmRgbRows.length) {
+                console.warn(
+                    "FM6373: Found 1-CLK LAT pulses but not a complete group of 16."
+                );
+                return;
+            }
+
+            firstDataIndex = fmRgbRows[0][0].startIndex;
+
+            console.log(
+                `%cFM6373 LAT sync: config pulses start at LAT index ${cfgStartPulseIdx}, ` +
+                    `RGB rows=${fmRgbRows.length}, firstDataIndex=${firstDataIndex}`,
+                "color:#0f0;font-weight:bold;"
             );
         }
 
+
+        // Map a raw 16-bit FM6373 word to an 8-bit brightness (0..255)
+        function fmWordToBrightness(word16) {
+            const raw16 = word16 & 0xffff; // 0..65535
+
+            // If you want true linear, this alone is enough but looks very dark:
+            // const norm = raw16 / 65535;
+
+            // Apply gamma to boost low levels so patterns are visible.
+            // gamma ≈ 2.2, so we raise to 1/gamma.
+            const norm = raw16 / 65535;
+            const gammaInv = 1 / 2.2;
+            const scaled = Math.pow(norm, gammaInv); // 0..1
+
+            return Math.round(scaled * 255); // 0..255
+        }        
+        
         // ------------------------------------------------------------------
-        //  FM6373: BUILD FRAME BUFFERS FROM R0/R1 STREAM
+        //  FM6373: BUILD FRAME BUFFERS FROM R0/R1 STREAM (LAT block-based)
         // ------------------------------------------------------------------
         function buildFm6373FrameFromR0(startIdx = 0) {
             if (!fm6373Mode || !dataSignals) return;
 
-            console.time("FM6373 Decode");
+            console.time("FM6373 Decode (LAT-based)");
             console.clear();
             console.log(
-                "%c FM6373 DECODE STARTED ",
+                "%c FM6373 DECODE STARTED (LAT-based R0/R1 blocks) ",
                 "background: blue; color: white"
             );
 
@@ -1534,140 +1656,148 @@
             fmPixelEvent.fill(-1);
             fmPixelRawWord.fill(0);
 
-            const BLOCKS_PER_ROW = 16;
-            const WORDS_PER_BLOCK = 8;
-            const STRIDE = 16;
-
-            let curWord0 = 0;
-            let curWord1 = 0;
-            let bits = 0;
-            let wordCounter = 0;
-            let waitingForBlockSync = false;
-            let syncStep = 0;
-
-            // Always keep the raw 0–255 level in the frame buffer.
-            // The UI toggle only changes how we *display* it.
-            const toBrightness8 = (raw8) => raw8;
-
-            for (let i = startIdx; i < totalEvents; i++) {
-                const prev = i === 0 ? 0 : dataSignals[i - 1];
-                const cur = dataSignals[i];
-
-                const clkPrevHigh = (prev & MASK_CLK) !== 0;
-                const clkHigh = (cur & MASK_CLK) !== 0;
-                const latHigh = (cur & MASK_LAT) !== 0;
-
-                // Wait for LAT to go high then low between blocks
-                if (waitingForBlockSync) {
-                    if (syncStep === 0 && latHigh) syncStep = 1;
-                    else if (syncStep === 1 && !latHigh) {
-                        waitingForBlockSync = false;
-                        syncStep = 0;
-                    }
-                    continue;
-                }
-
-                // Clock rising edge
-                if (i === startIdx || (!clkPrevHigh && clkHigh)) {
-                    const bit0 = (cur >> 5) & 1; // R0
-                    const bit1 = (cur >> 8) & 1; // R1
-
-                    curWord0 = ((curWord0 << 1) | bit0) & 0xffff;
-                    curWord1 = ((curWord1 << 1) | bit1) & 0xffff;
-                    bits++;
-
-                    if (bits === 16) {
-                        const rowScanIdx = Math.floor(wordCounter / 128);
-                        const indexInRow = wordCounter % 128;
-                        const blockIdx = Math.floor(
-                            indexInRow / WORDS_PER_BLOCK
-                        );
-                        const wordInBlock = indexInRow % WORDS_PER_BLOCK;
-
-                        const storePixel = (val16, yOffset) => {
-                            const y = rowScanIdx + yOffset;
-                            if (y >= h) return;
-
-                            const hi = (val16 >> 8) & 0xff;
-                            const lo = val16 & 0xff;
-
-                            // Base 8‑bit value for "normal" columns (0..111)
-                            let raw8 = hi;
-                            if (raw8 === 0 && lo !== 0) {
-                                raw8 = lo;
-                            }
-
-                            // 0..111 columns (words 1..7 of each block)
-                            if (wordInBlock > 0) {
-                                const pixelGroupIdx = wordInBlock - 1;
-                                const x =
-                                    blockIdx + pixelGroupIdx * STRIDE;
-                                if (x < w && x < 112) {
-                                    const idx = y * w + x;
-                                    fmFrameR[idx] = toBrightness8(raw8);
-                                    fmPixelEvent[idx] = i;
-                                    fmPixelRawWord[idx] = val16;
-                                }
-                            }
-
-                            // Extra column (112..127) from last word in block
-                            // Extra column (112..127) from last word in block
-                            if (wordInBlock === 7) {
-                                const xExtra = blockIdx + 112;
-                                if (xExtra < w) {
-                                    const idx = y * w + xExtra;
-
-                                    // Start from the same 8‑bit level we use for the "normal"
-                                    // columns in this word (high byte, or low byte if high is 0).
-                                    let raw8Extra = raw8;
-
-                                    // Optional 4‑bit brightness override in low nibble.
-                                    // Sometimes this nibble is 0 even though the high byte
-                                    // carries a real brightness value, so we *only* replace
-                                    // the 8‑bit level when the nibble is non‑zero.
-                                    const loByte = lo;
-                                    let raw4 = loByte & 0x0f;
-                                    if (raw4 !== 0) {
-                                        // Map 0..15 → 0..255
-                                        raw8Extra = Math.round((raw4 * 255) / 15);
-                                    }
-
-                                    fmFrameR[idx] = raw8Extra;
-                                    fmPixelEvent[idx] = i;
-                                    fmPixelRawWord[idx] = val16;
-                                }
-                            }
-                        };
-
-                        // Top / bottom half (R0/R1)
-                        storePixel(curWord0, 0);
-                        storePixel(curWord1, 32);
-
-                        wordCounter++;
-                        curWord0 = 0;
-                        curWord1 = 0;
-                        bits = 0;
-
-                        // After each block, wait for LAT hi→lo before next
-                        if (wordCounter % WORDS_PER_BLOCK === 0) {
-                            waitingForBlockSync = true;
-                            syncStep = latHigh ? 1 : 0;
-                        }
-
-                        // Only decode one full 1/32 scan
-                        if (rowScanIdx >= MAX_SCAN_ROWS) {
-                            console.log(
-                                `%c Frame Lock: Stop at Row ${rowScanIdx}`,
-                                "color:orange"
-                            );
-                            break;
-                        }
-                    }
-                }
+            // Ensure LAT pulses + RGB rows are available
+            if (!fmLatPulses.length || !fmRgbRows.length) {
+                detectFrameStartFromR0();
             }
 
-            console.timeEnd("FM6373 Decode");
+            if (!fmRgbRows.length) {
+                console.warn("FM6373: No RGB LAT rows detected, aborting decode.");
+                console.timeEnd("FM6373 Decode (LAT-based)");
+                return;
+            }
+
+            // Build flat bit stream (includes CLK while LAT is HIGH)
+            buildBitEventsFromR0R1();
+            if (!bitEvents || !bitEvents.length) {
+                console.warn("FM6373: No bit events from R0/R1.");
+                console.timeEnd("FM6373 Decode (LAT-based)");
+                return;
+            }
+
+            const WORDS_PER_BLOCK = 8;
+            const BITS_PER_WORD = 16;
+            const BITS_PER_BLOCK = WORDS_PER_BLOCK * BITS_PER_WORD;
+            const BLOCKS_PER_ROW = 16;
+            const maxRowsToDecode = Math.min(fmRgbRows.length, MAX_SCAN_ROWS);
+
+            for (let rowScan = 0; rowScan < maxRowsToDecode; rowScan++) {
+                const pulsesForRow = fmRgbRows[rowScan];
+                if (!pulsesForRow || pulsesForRow.length < BLOCKS_PER_ROW) break;
+
+                const yTop = rowScan;
+                const yBottom = rowScan + 32; // 1/32 scan pairing
+
+                console.groupCollapsed(
+                    `FM6373: Row ${rowScan} (Y=${yTop}${
+                        yBottom < h ? "/" + yBottom : ""
+                    })`
+                );
+
+                for (let block = 0; block < BLOCKS_PER_ROW; block++) {
+                    const pulse = pulsesForRow[block];
+
+                    const anchorSample = pulse.clkSampleIndex;
+                    if (anchorSample == null || anchorSample < 0) {
+                        console.warn(
+                            `FM6373: LAT pulse (row ${rowScan}, block ${block}) has no CLK inside; skipping`
+                        );
+                        continue;
+                    }
+
+                    // Find index of the bit event that corresponds to this CLK
+                    let anchorBitIndex =
+                        bitIndexBySample && bitIndexBySample.get(anchorSample);
+                    if (anchorBitIndex === undefined) {
+                        // Fallback: search by range
+                        anchorBitIndex = bitEvents.findIndex(
+                            (b) =>
+                                b.sampleIndex >= pulse.startIndex &&
+                                b.sampleIndex <= pulse.endIndex
+                        );
+                    }
+                    if (anchorBitIndex < 0) {
+                        console.warn(
+                            `FM6373: No bit event found for anchor sample ${anchorSample} (row ${rowScan}, block ${block})`
+                        );
+                        continue;
+                    }
+
+                    const lastBitIndex = anchorBitIndex;
+                    const firstBitIndex = lastBitIndex - (BITS_PER_BLOCK - 1);
+                    if (firstBitIndex < 0) {
+                        console.warn(
+                            `FM6373: Not enough bits before anchor sample ${anchorSample} to form 8 words (row ${rowScan}, block ${block}).`
+                        );
+                        continue;
+                    }
+
+                    console.groupCollapsed(
+                        `Row ${rowScan}, block ${block} @ LAT start=${pulse.startIndex}, anchorCLK=${anchorSample}`
+                    );
+
+                    for (let wordInBlock = 0; wordInBlock < WORDS_PER_BLOCK; wordInBlock++) {
+                        let wordR0 = 0;
+                        let wordR1 = 0;
+                        const bitBase = firstBitIndex + wordInBlock * BITS_PER_WORD;
+
+                        for (let b = 0; b < BITS_PER_WORD; b++) {
+                            const ev = bitEvents[bitBase + b];
+                            wordR0 = ((wordR0 << 1) | ev.bitR0) & 0xffff;
+                            wordR1 = ((wordR1 << 1) | ev.bitR1) & 0xffff;
+                        }
+
+                        const lastBitSample =
+                            bitEvents[bitBase + BITS_PER_WORD - 1].sampleIndex;
+
+                        // Interleaved Modulo-16 addressing:
+                        // columns are grouped by word index, not by block
+                        const BLOCKS_PER_ROW = 16;   // you already have this constant above
+                        const wordIndex = wordInBlock;   // 0..7
+                        const x = wordIndex * BLOCKS_PER_ROW + block;
+                        if (x >= w) continue;
+
+                        // --- Console debug: binary + hex for both channels ---
+                        const binR0 = wordR0.toString(2).padStart(16, "0");
+                        const binR1 = wordR1.toString(2).padStart(16, "0");
+                        const hexR0 = "0x" + wordR0.toString(16).padStart(4, "0");
+                        const hexR1 = "0x" + wordR1.toString(16).padStart(4, "0");
+
+                        console.log(
+                            `Word ${wordInBlock} (x=${x}) @event ${lastBitSample}  |  ` +
+                                `R0 ${binR0} (${hexR0})  R1 ${binR1} (${hexR1})`
+                        );
+
+                        // --- Map to pixel brightness ---
+                        // All columns 0–127 behave the same now: one 16-bit word per column.
+                        // Use the full 16-bit word with a gamma curve (no special 0x0002 handling).
+                        const brightnessTop = fmWordToBrightness(wordR0);
+                        const brightnessBottom = fmWordToBrightness(wordR1);
+
+                        if (yTop < h) {
+                            const idxTop = yTop * w + x;
+                            fmFrameR[idxTop] = brightnessTop;
+                            fmPixelEvent[idxTop] = lastBitSample;
+                            fmPixelRawWord[idxTop] = wordR0;
+                        }
+
+                        if (yBottom < h) {
+                            const idxBottom = yBottom * w + x;
+                            fmFrameR[idxBottom] = brightnessBottom;
+                            fmPixelEvent[idxBottom] = lastBitSample;
+                            fmPixelRawWord[idxBottom] = wordR1;
+                        }
+                    }
+
+                    console.groupEnd(); // block
+                }
+
+                console.groupEnd(); // row
+            }
+
+            console.timeEnd("FM6373 Decode (LAT-based)");
         }
+
 
         // ------------------------------------------------------------------
         //  PANEL CONFIG APPLY / RESIZING
