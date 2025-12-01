@@ -33,17 +33,23 @@
             flex-grow: 1.5;
         }
         .controls-column {
-            flex-basis: 18%;
+            flex-basis: 14%;
             flex-grow: 1;
         }
         .decoder-column {
-            flex-basis: 24%;
+            flex-basis: 32%;
             flex-grow: 1;
         }
         .debug-column {
-            flex-basis: 18%;
+            flex-basis: 14%;
             flex-grow: 1;
         }
+        /* Force the WAVEFORM CHANNELS area to be shorter so the extra STATS
+        lines fit without changing the overall pane layout. Adjust the
+        max-height value to taste. */
+        .decoder-waveform {
+            max-height: 230px;   /* tweak this number if you want more/less */
+        }        
 
         /* ---------- LED Matrix Area ---------- */
         .matrix-scroll-area {
@@ -240,9 +246,16 @@
             box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.2);
         }
         .channel-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-            gap: 8px;
+            display: flex;
+            align-items: left;
+            justify-content: space-between;
+            background: #0f172a;
+            border: 0px;   /* <-- this is the grey border */
+            border-radius: 6px;
+            padding: 6px 8px;
+            gap: 10px;
+            display: flex;
+            flex-direction: column; /* stack items vertically */
         }
 
         .d-idx {
@@ -514,7 +527,8 @@
 
             <!-- stats + control signals -->
             <div class="p-4 border-b border-gray-700 space-y-2">
-                <div class="grid grid-cols-2 gap-4">
+                <!-- STATS + SIGNALS side-by-side -->
+                <div class="grid grid-cols-2 gap-4 items-start">
                     <!-- STATS -->
                     <div>
                         <h2 class="text-xs font-semibold text-gray-300 mb-1">
@@ -523,132 +537,162 @@
                         <div class="space-y-1 font-mono text-xs">
                             <div class="flex justify-between">
                                 <span class="text-gray-400">Time:</span>
-                                <span id="stat-time" class="text-white"
-                                    >0.00000000s</span
-                                >
+                                <span id="stat-time" class="text-white">0.00000000s</span>
                             </div>
                             <div class="flex justify-between">
                                 <span class="text-gray-400">Row Addr:</span>
-                                <span
-                                    id="stat-addr"
-                                    class="text-yellow-400 font-bold"
-                                    >--</span
-                                >
+                                <span id="stat-addr" class="text-yellow-400 font-bold">--</span>
                             </div>
                             <div class="flex justify-between">
                                 <span class="text-gray-400">Active Rows:</span>
-                                <span id="stat-scan" class="text-blue-400"
-                                    >--</span
-                                >
+                                <span id="stat-scan" class="text-blue-400">--</span>
                             </div>
                             <div class="flex justify-between">
                                 <span class="text-gray-400">Buffer Len:</span>
-                                <span id="stat-shift" class="text-purple-400"
-                                    >0</span
+                                <span id="stat-shift" class="text-purple-400">0</span>
+                            </div>
+
+                            <!-- RGB debug -->
+                            <br>
+                            <div class="flex justify-between">
+                                <span class="text-gray-400">RGB Pos:</span>
+                                <span id="stat-rgb-pos" class="text-teal-400">--</span>
+                            </div>
+                            <div class="mt-1">
+                                <span class="text-gray-400">RGB Word:</span>
+                                <div
+                                    id="stat-rgb-word"
+                                    class="mt-1.5 text-gray-500 font-mono text-[10px] leading-tight"
                                 >
+                                    <div class="mb-1.5 text-gray-300">Word -- · Bit --</div>
+                                    <div>
+                                        <span class="text-red-400">R0</span>
+                                        - <span class="text-gray-200">0x0000</span>
+                                        - <span class="font-mono">0000000000000000</span>
+                                    </div>
+                                    <div>
+                                        <span class="text-green-400">G0</span>
+                                        - <span class="text-gray-200">0x0000</span>
+                                        - <span class="font-mono">0000000000000000</span>
+                                    </div>
+                                    <div>
+                                        <span class="text-blue-400">B0</span>
+                                        - <span class="text-gray-200">0x0000</span>
+                                        - <span class="font-mono">0000000000000000</span>
+                                    </div>
+                                    <div>
+                                        <span class="text-red-400">R1</span>
+                                        - <span class="text-gray-200">0x0000</span>
+                                        - <span class="font-mono">0000000000000000</span>
+                                    </div>
+                                    <div>
+                                        <span class="text-green-400">G1</span>
+                                        - <span class="text-gray-200">0x0000</span>
+                                        - <span class="font-mono">0000000000000000</span>
+                                    </div>
+                                    <div>
+                                        <span class="text-blue-400">B1</span>
+                                        - <span class="text-gray-200">0x0000</span>
+                                        - <span class="font-mono">0000000000000000</span>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </div>
 
-                    <!-- CONTROL SIGNALS -->
-                    <div>
+                    <!-- SIGNALS (now to the right of STATS) -->
+                    <div style="padding-left: 10px;">
                         <h2 class="text-xs font-semibold text-gray-300 mb-1">
                             SIGNALS
                         </h2>
                         <div class="space-y-1 font-mono text-xs">
-                            <div
-                                class="flex justify-between items-center text-gray-200"
-                            >
+                            <div class="flex justify-between items-center text-gray-200">
                                 <span>OE (Output)</span>
                                 <span id="sig-oe" class="sig-lo">HI (OFF)</span>
                             </div>
-                            <div
-                                class="flex justify-between items-center text-gray-200"
-                            >
+                            <div class="flex justify-between items-center text-gray-200">
                                 <span>LAT (Latch)</span>
                                 <span id="sig-lat" class="sig-lo">LO</span>
                             </div>
-                            <div
-                                class="flex justify-between items-center text-gray-200"
-                            >
+                            <div class="flex justify-between items-center text-gray-200">
                                 <span>CLK (Clock)</span>
                                 <span id="sig-clk" class="sig-lo">LO</span>
                             </div>
                         </div>
                     </div>
                 </div>
-            </div>
 
-            <!-- waveform channels -->
-            <div class="p-2 bg-gray-850 overflow-y-auto flex-1">
-                <h3 class="text-sm font-bold text-green-500 mb-2">
-                    WAVEFORM CHANNELS
-                </h3>
-                <div id="channel-toggles" class="channel-grid"></div>
-            </div>
-        </div>
-
-        <!-- 4. EVENT DEBUG ------------------------------------------------- -->
-        <div class="top-column debug-column bg-gray-900">
-            <h1
-                class="text-sm font-bold text-white p-2 text-center border-b border-gray-700"
-            >
-                EVENT DEBUG (+/- 30)
-            </h1>
-
-            <div
-                class="debug-header flex justify-between px-2 bg-gray-850 border-b border-gray-700"
-            >
-                <span class="d-idx">IDX</span>
-                <span class="d-addr">ADR</span>
-                <span class="d-data">RGB0 RGB1</span>
-                <span class="d-sig">C</span>
-                <span class="d-sig">L</span>
-                <span class="d-sig">O</span>
-            </div>
-
-            <div id="debug-list" class="flex-1 overflow-hidden bg-gray-900">
-                <div class="p-4 text-center text-gray-500 text-xs mt-10">
-                    Load CSV to view data
-                    <div
-                        class="mt-4 text-[10px] font-mono space-y-1"
-                    >
-                        <div class="flex justify-between">
-                            <span>File Status:</span>
-                            <span
-                                id="file-status"
-                                class="text-white"
-                                >No File</span
-                            >
-                        </div>
-                        <div class="flex justify-between">
-                            <span>Config:</span>
-                            <span
-                                id="config-display"
-                                class="text-gray-300"
-                                >128x64</span
-                            >
-                        </div>
-                        <div class="flex justify-between">
-                            <span>Detected Clocks:</span>
-                            <span
-                                id="detected-width-display"
-                                class="text-yellow-400"
-                                >--</span
-                            >
-                        </div>
-                        <div class="flex justify-between">
-                            <span>Headers Found:</span>
-                            <span
-                                id="headers-status"
-                                class="text-green-400"
-                                >--</span
-                            >
-                        </div>
-                    </div>
+                <!-- WAVEFORM CHANNELS under both -->
+                <div class="decoder-waveform p-2 bg-gray-850 overflow-y-auto flex-1">
+                    <h3 class="text-sm font-bold text-green-500 mb-2">
+                        WAVEFORM CHANNELS
+                    </h3>
+                    <div id="channel-toggles" class="channel-grid"></div>
                 </div>
             </div>
         </div>
+                <!-- 4. EVENT DEBUG ------------------------------------------------- -->
+                <div class="top-column debug-column bg-gray-900">
+                    <h1
+                        class="text-sm font-bold text-white p-2 text-center border-b border-gray-700"
+                    >
+                        EVENT DEBUG (+/- 30)
+                    </h1>
+
+                    <div
+                        class="debug-header flex justify-between px-2 bg-gray-850 border-b border-gray-700"
+                    >
+                        <span class="d-idx">IDX</span>
+                        <span class="d-addr">ADR</span>
+                        <span class="d-data">RGB0 RGB1</span>
+                        <span class="d-sig">C</span>
+                        <span class="d-sig">L</span>
+                        <span class="d-sig">O</span>
+                    </div>
+
+                    <div id="debug-list" class="flex-1 overflow-hidden bg-gray-900">
+                        <div class="p-4 text-center text-gray-500 text-xs mt-10">
+                            Load CSV to view data
+                            <div
+                                class="mt-4 text-[10px] font-mono space-y-1"
+                            >
+                                <div class="flex justify-between">
+                                    <span>File Status:</span>
+                                    <span
+                                        id="file-status"
+                                        class="text-white"
+                                        >No File</span
+                                    >
+                                </div>
+                                <div class="flex justify-between">
+                                    <span>Config:</span>
+                                    <span
+                                        id="config-display"
+                                        class="text-gray-300"
+                                        >128x64</span
+                                    >
+                                </div>
+                                <div class="flex justify-between">
+                                    <span>Detected Clocks:</span>
+                                    <span
+                                        id="detected-width-display"
+                                        class="text-yellow-400"
+                                        >--</span
+                                    >
+                                </div>
+                                <div class="flex justify-between">
+                                    <span>Headers Found:</span>
+                                    <span
+                                        id="headers-status"
+                                        class="text-green-400"
+                                        >--</span
+                                    >
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>                
+        </div>            
     </div>
 
     <!-- ========================= SPLITTER =============================== -->
@@ -756,6 +800,11 @@
         let bitEvents = [];       // every CLK rising edge with R0/R1 bits
         let bitIndexBySample = null; // Map: sampleIndex -> index in bitEvents
 
+        // Per-bit metadata for FM6373 RGB data
+        let fmBitMetaBySample = null;   // Map: sampleIndex -> { row, block, wordInBlock, bitIndex, x, yTop, yBottom, words }
+        let fmRgbDataMinSample = 0;     // first sample index used for RGB words
+        let fmRgbDataMaxSample = 0;     // last sample index used for RGB words
+
         // ------------------------------------------------------------------
         //  DOM ELEMENT REFERENCES
         // ------------------------------------------------------------------
@@ -792,6 +841,9 @@
         const elAddr = document.getElementById("stat-addr");
         const elScan = document.getElementById("stat-scan");
         const elShift = document.getElementById("stat-shift");
+        const elRgbPos = document.getElementById("stat-rgb-pos");
+        const elRgbWord = document.getElementById("stat-rgb-word");
+        
 
         const elSigOE = document.getElementById("sig-oe");
         const elSigLAT = document.getElementById("sig-lat");
@@ -818,8 +870,10 @@
         let matrixResizeObserver = null;
         let waveformResizeObserver = null;
 
+        // Switches
+        const logGlobalVariables = false
         // For debugging row drawing from console
-        window.debugRow = -1;
+        window.debugRow = -1;           
 
         // ------------------------------------------------------------------
         //  WAVEFORM CHANNEL DEFINITIONS
@@ -828,17 +882,17 @@
             { name: "A", mask: 1, color: "#22d3ee", column: "left", defaultEnabled: true },
             { name: "B", mask: 1 << 1, color: "#0ea5e9", column: "left", defaultEnabled: true },
             { name: "C", mask: 1 << 2, color: "#c084fc", column: "left", defaultEnabled: true },
-            { name: "D", mask: 1 << 3, color: "#f97316", column: "right", defaultEnabled: false },
-            { name: "E", mask: 1 << 4, color: "#f472b6", column: "right", defaultEnabled: false },
-            { name: "OE", mask: MASK_OE, color: "#facc15", column: "left", defaultEnabled: true },
-            { name: "LAT", mask: MASK_LAT, color: "#facc15", column: "left", defaultEnabled: true },
+            { name: "D", mask: 1 << 3, color: "#f97316", column: "left", defaultEnabled: false },
+            { name: "E", mask: 1 << 4, color: "#f472b6", column: "left", defaultEnabled: false },            
             { name: "CLK", mask: MASK_CLK, color: "#38bdf8", column: "left", defaultEnabled: true },
             { name: "R0", mask: 1 << 5, color: "#ef4444", column: "right", defaultEnabled: true },
             { name: "G0", mask: 1 << 6, color: "#22c55e", column: "right", defaultEnabled: true },
             { name: "B0", mask: 1 << 7, color: "#3b82f6", column: "right", defaultEnabled: true },
-            { name: "R1", mask: 1 << 8, color: "#ef4444", column: "right", defaultEnabled: true },
-            { name: "G1", mask: 1 << 9, color: "#22c55e", column: "right", defaultEnabled: true },
-            { name: "B1", mask: 1 << 10, color: "#3b82f6", column: "right", defaultEnabled: true }
+            { name: "R1", mask: 1 << 8, color: "#ef4444", column: "right", defaultEnabled: false },
+            { name: "LAT", mask: MASK_LAT, color: "#facc15", column: "right", defaultEnabled: true },
+            { name: "OE", mask: MASK_OE, color: "#facc15", column: "right", defaultEnabled: true },            
+            { name: "G1", mask: 1 << 9, color: "#22c55e", column: "right", defaultEnabled: false },
+            { name: "B1", mask: 1 << 10, color: "#3b82f6", column: "right", defaultEnabled: false }
         ];
 
         let enabledChannels = WAVE_CHANNELS.map(
@@ -1217,6 +1271,9 @@
                 const reader = new FileReader();
                 reader.onload = (evt) => {
                     console.time("parseCSV_total");
+                    // Clear all global variables to avoid issues with leftover data
+                    resetState()
+                    if (logGlobalVariables){logAllVariables(true);}                    
                     try {
                         parseCSV(evt.target.result);
                         fileStatus.textContent = "Loaded";
@@ -1400,20 +1457,40 @@
             detectedWidthDisplay.textContent = maxClocks;
 
             // Suggest panel width based on measured clocks
-            if (maxClocks > 120 && maxClocks < 150) widthInput.value = 128;
-            else widthInput.value = maxClocks > 32 ? maxClocks : 64;
+            if (maxClocks > 120 && maxClocks < 150) {
+                widthInput.value = 128;
+            } else {
+                widthInput.value = maxClocks > 32 ? maxClocks : 64;
+            }
 
-            // Lock onto the frame start for FM6373
-            detectFrameStartFromR0();
+            // ------------------------------------------------------------------
+            // FM6373: build frame + derive the *true* start of RGB data
+            // ------------------------------------------------------------------
+            if (fm6373Mode) {
+                // Decode FM6373 RGB words first. This will also:
+                //   - scan LAT pulses
+                //   - build fmRgbRows
+                //   - populate fmBitMetaBySample
+                //   - set fmRgbDataMinSample / fmRgbDataMaxSample
+                allocFmFrame();
+                buildFm6373FrameFromR0(0);   // arg is unused, can be 0
+
+                // If we decoded any RGB data, move the logical start of the
+                // timeline to the *first bit of the first 16-bit word*,
+                // instead of the LAT pulse at the end of block 0.
+                if (fmRgbDataMinSample !== Number.MAX_SAFE_INTEGER) {
+                    firstDataIndex = fmRgbDataMinSample;
+                } else {
+                    // Fallback: use the old LAT-based start if decode failed
+                    detectFrameStartFromR0();
+                }
+            } else {
+                // Non-FM path: still try to find a reasonable start via LAT
+                detectFrameStartFromR0();
+            }
 
             dropZone.innerHTML = `Loaded <strong>${totalEvents}</strong> events`;
             applyConfig();
-
-            // Build FM6373 frame if enabled
-            if (fm6373Mode) {
-                allocFmFrame();
-                buildFm6373FrameFromR0(firstDataIndex);
-            }
 
             console.timeEnd("parseCSV_core");
         }
@@ -1476,10 +1553,14 @@
 
 
         /**
-         * Collect a flat list of bit events for R0/R1.
+         * Collect a flat list of bit events for all data lines.
          * One entry per CLK rising edge (LAT low *or* high).
          *
-         * bitEvents = [{ sampleIndex, bitR0, bitR1 }, ...]
+         * bitEvents = [{
+         *   sampleIndex,
+         *   bitR0, bitG0, bitB0,
+         *   bitR1, bitG1, bitB1
+         * }, ...]
          */
         function buildBitEventsFromR0R1() {
             bitEvents = [];
@@ -1495,23 +1576,31 @@
 
                 // Take *every* CLK rising edge: LAT low or high
                 if (!clkPrevHigh && clkHigh) {
-                    const bitR0 = (cur >> 5) & 1; // R0
-                    const bitR1 = (cur >> 8) & 1; // R1
+                    const bitR0 = (cur >> 5) & 1;
+                    const bitG0 = (cur >> 6) & 1;
+                    const bitB0 = (cur >> 7) & 1;
+                    const bitR1 = (cur >> 8) & 1;
+                    const bitG1 = (cur >> 9) & 1;
+                    const bitB1 = (cur >> 10) & 1;
+
                     const idx = bitEvents.length;
                     bitEvents.push({
                         sampleIndex: i,
                         bitR0,
-                        bitR1
+                        bitG0,
+                        bitB0,
+                        bitR1,
+                        bitG1,
+                        bitB1
                     });
                     bitIndexBySample.set(i, idx);
                 }
             }
 
             console.log(
-                `FM6373: collected ${bitEvents.length} bit events from R0/R1 (all CLK rising edges)`
+                `FM6373: collected ${bitEvents.length} CLK edges with RGB data bits`
             );
         }
-
 
         
         // ------------------------------------------------------------------
@@ -1636,7 +1725,7 @@
             if (!fm6373Mode || !dataSignals) return;
 
             console.time("FM6373 Decode (LAT-based)");
-            console.clear();
+            if (!logGlobalVariables){console.clear();}
             console.log(
                 "%c FM6373 DECODE STARTED (LAT-based R0/R1 blocks) ",
                 "background: blue; color: white"
@@ -1655,6 +1744,11 @@
             if (fmFrameB) fmFrameB.fill(0);
             fmPixelEvent.fill(-1);
             fmPixelRawWord.fill(0);
+
+            // Reset RGB bit metadata
+            fmBitMetaBySample = new Map();
+            fmRgbDataMinSample = Number.MAX_SAFE_INTEGER;
+            fmRgbDataMaxSample = 0;            
 
             // Ensure LAT pulses + RGB rows are available
             if (!fmLatPulses.length || !fmRgbRows.length) {
@@ -1737,25 +1831,40 @@
                     );
 
                     for (let wordInBlock = 0; wordInBlock < WORDS_PER_BLOCK; wordInBlock++) {
-                        let wordR0 = 0;
-                        let wordR1 = 0;
+                        let wordR0 = 0,
+                            wordG0 = 0,
+                            wordB0 = 0,
+                            wordR1 = 0,
+                            wordG1 = 0,
+                            wordB1 = 0;
+
                         const bitBase = firstBitIndex + wordInBlock * BITS_PER_WORD;
+                        const sampleIndicesForWord = new Array(BITS_PER_WORD);
 
                         for (let b = 0; b < BITS_PER_WORD; b++) {
                             const ev = bitEvents[bitBase + b];
+
+                            sampleIndicesForWord[b] = ev.sampleIndex;
+
                             wordR0 = ((wordR0 << 1) | ev.bitR0) & 0xffff;
+                            wordG0 = ((wordG0 << 1) | ev.bitG0) & 0xffff;
+                            wordB0 = ((wordB0 << 1) | ev.bitB0) & 0xffff;
+
                             wordR1 = ((wordR1 << 1) | ev.bitR1) & 0xffff;
+                            wordG1 = ((wordG1 << 1) | ev.bitG1) & 0xffff;
+                            wordB1 = ((wordB1 << 1) | ev.bitB1) & 0xffff;
                         }
 
-                        const lastBitSample =
-                            bitEvents[bitBase + BITS_PER_WORD - 1].sampleIndex;
+                        const firstSample = sampleIndicesForWord[0];
+                        const lastBitSample = sampleIndicesForWord[BITS_PER_WORD - 1];
+
+                        // Track global RGB data range
+                        if (firstSample < fmRgbDataMinSample) fmRgbDataMinSample = firstSample;
+                        if (lastBitSample > fmRgbDataMaxSample) fmRgbDataMaxSample = lastBitSample;
 
                         // Interleaved Modulo-16 addressing:
-                        // columns are grouped by word index, not by block
-                        const BLOCKS_PER_ROW = 16;   // you already have this constant above
-                        const wordIndex = wordInBlock;   // 0..7
+                        const wordIndex = wordInBlock; // 0..7
                         const x = wordIndex * BLOCKS_PER_ROW + block;
-                        if (x >= w) continue;
 
                         // --- Console debug: binary + hex for both channels ---
                         const binR0 = wordR0.toString(2).padStart(16, "0");
@@ -1768,26 +1877,51 @@
                                 `R0 ${binR0} (${hexR0})  R1 ${binR1} (${hexR1})`
                         );
 
-                        // --- Map to pixel brightness ---
-                        // All columns 0–127 behave the same now: one 16-bit word per column.
-                        // Use the full 16-bit word with a gamma curve (no special 0x0002 handling).
+                        // --- Map to pixel brightness (still only R channel for now) ---
                         const brightnessTop = fmWordToBrightness(wordR0);
                         const brightnessBottom = fmWordToBrightness(wordR1);
 
-                        if (yTop < h) {
-                            const idxTop = yTop * w + x;
-                            fmFrameR[idxTop] = brightnessTop;
-                            fmPixelEvent[idxTop] = lastBitSample;
-                            fmPixelRawWord[idxTop] = wordR0;
+                        if (x < w) {
+                            if (yTop < h) {
+                                const idxTop = yTop * w + x;
+                                fmFrameR[idxTop] = brightnessTop;
+                                fmPixelEvent[idxTop] = lastBitSample;
+                                fmPixelRawWord[idxTop] = wordR0;
+                            }
+
+                            if (yBottom < h) {
+                                const idxBottom = yBottom * w + x;
+                                fmFrameR[idxBottom] = brightnessBottom;
+                                fmPixelEvent[idxBottom] = lastBitSample;
+                                fmPixelRawWord[idxBottom] = wordR1;
+                            }
                         }
 
-                        if (yBottom < h) {
-                            const idxBottom = yBottom * w + x;
-                            fmFrameR[idxBottom] = brightnessBottom;
-                            fmPixelEvent[idxBottom] = lastBitSample;
-                            fmPixelRawWord[idxBottom] = wordR1;
+                        // --- NEW: attach per-bit metadata for this word ---
+                        const wordsObj = {
+                            R0: wordR0,
+                            G0: wordG0,
+                            B0: wordB0,
+                            R1: wordR1,
+                            G1: wordG1,
+                            B1: wordB1
+                        };
+
+                        for (let b = 0; b < BITS_PER_WORD; b++) {
+                            const sampleIndexBit = sampleIndicesForWord[b];
+                            fmBitMetaBySample.set(sampleIndexBit, {
+                                row: rowScan,
+                                block,
+                                wordInBlock,
+                                bitIndex: b,            // 0 = MSB, 15 = LSB
+                                x,
+                                yTop,
+                                yBottom: yBottom < h ? yBottom : -1,
+                                words: wordsObj
+                            });
                         }
                     }
+
 
                     console.groupEnd(); // block
                 }
@@ -2258,7 +2392,7 @@
 
             if (waveCanvas.width > 0) drawWaveform();
         }
-
+        
         // ------------------------------------------------------------------
         //  SIGNAL / DEBUG PANEL
         // ------------------------------------------------------------------
@@ -2285,6 +2419,9 @@
             elAddr.textContent = addr;
             elScan.textContent = `Row ${addr} & ${addr + halfHeight}`;
             elShift.textContent = vmBuffer0.length;
+
+            // Keep RGB stats in sync with the current sample
+            updateRgbStats(idx);
         }
 
         function jumpToEvent(idx) {
@@ -2292,6 +2429,150 @@
             scrubber.dispatchEvent(new Event("input"));
         }
         window.jumpToEvent = jumpToEvent; // used by debug-row onclick
+
+        function getRgbBitMetaForSample(sampleIndex) {
+        if (
+            !fm6373Mode ||
+            !fmBitMetaBySample ||
+            !bitEvents ||
+            bitEvents.length === 0 ||
+            fmBitMetaBySample.size === 0
+        ) {
+            return null;
+        }
+
+        // Clamp to the RGB data range
+        if (sampleIndex < fmRgbDataMinSample) {
+            sampleIndex = fmRgbDataMinSample;
+        }
+        if (sampleIndex > fmRgbDataMaxSample) {
+            sampleIndex = fmRgbDataMaxSample;
+        }
+
+        // Find the last CLK edge at or before sampleIndex
+        let lo = 0;
+        let hi = bitEvents.length - 1;
+        let best = 0;
+
+        while (lo <= hi) {
+            const mid = (lo + hi) >> 1;
+            const s = bitEvents[mid].sampleIndex;
+
+            if (s <= sampleIndex) {
+            best = mid;       // this edge is at or before the cursor
+            lo = mid + 1;     // try to find a later one
+            } else {
+            hi = mid - 1;     // too late, go earlier
+            }
+        }
+
+        const s = bitEvents[best].sampleIndex;
+        return fmBitMetaBySample.get(s) || null;
+        }
+
+
+        function updateRgbStats(sampleIndex) {
+            if (!elRgbPos || !elRgbWord) return;
+
+            const labels = ["R0", "G0", "B0", "R1", "G1", "B1"];
+
+            const render = (meta) => {
+                const words = meta
+                    ? meta.words
+                    : {
+                        R0: 0,
+                        G0: 0,
+                        B0: 0,
+                        R1: 0,
+                        G1: 0,
+                        B1: 0,
+                    };
+
+                let bitFromMsb = null;
+                let bitFromLsb = null;
+
+                if (meta) {
+                    // inside RGB data
+                    elRgbPos.classList.remove("text-gray-500");
+                    elRgbPos.classList.add("text-teal-400");
+                    elRgbPos.textContent =
+                        `Row ${meta.row}, Col ${meta.block} (x=${meta.x})`;
+
+                    bitFromMsb = meta.bitIndex;        // 0..15
+                    bitFromLsb = 15 - meta.bitIndex;   // 15..0
+                } else {
+                    // no RGB meta -> show zeros but keep labels
+                    elRgbPos.textContent = "--";
+                    elRgbPos.classList.remove("text-teal-400");
+                    elRgbPos.classList.add("text-gray-500");
+                }
+
+                const highlightBits = (value) => {
+                    const bin = value.toString(2).padStart(16, "0");
+                    if (bitFromMsb == null) {
+                        // no active bit -> plain bits
+                        return bin;
+                    }
+                    let out = "";
+                    for (let i = 0; i < bin.length; i++) {
+                        const ch = bin[i];
+                        if (i === bitFromMsb) {
+                            out += `<span class="text-yellow-300">${ch}</span>`;
+                        } else {
+                            out += ch;
+                        }
+                    }
+                    return out;
+                };
+
+                const lines = [];
+                const wordLabel = meta ? meta.wordInBlock : "--";
+                const bitLabel =
+                    bitFromLsb != null ? bitFromLsb : "--";
+
+                lines.push(
+                    `<div class="mb-0.5 text-gray-300">Word ${wordLabel} · Bit ${bitLabel}</div>`
+                );
+
+                labels.forEach((label) => {
+                    const v = (words[label] >>> 0);
+                    const hex = "0x" + v.toString(16).padStart(4, "0");
+                    const bitsHtml = highlightBits(v);
+
+                    let channelClass = "text-sky-400";
+                    if (label[0] === "R") channelClass = "text-red-400";
+                    else if (label[0] === "G") channelClass = "text-green-400";
+                    else if (label[0] === "B") channelClass = "text-blue-400";
+
+                    lines.push(
+                        `<div><span class="${channelClass}">${label}</span>` +
+                        ` - <span class="text-gray-200">${hex}</span>` +
+                        ` - <span class="font-mono">${bitsHtml}</span></div>`
+                    );
+                });
+
+                elRgbWord.innerHTML = lines.join("");
+            };
+
+            // No FM6373 metadata -> show labels with zeroed words
+            if (!fm6373Mode || !fmBitMetaBySample || fmBitMetaBySample.size === 0) {
+                render(null);
+                return;
+            }
+
+            const meta = getRgbBitMetaForSample(sampleIndex);
+
+            // Outside RGB data region -> still show labels with zeros
+            if (!meta) {
+                render(null);
+                return;
+            }
+
+            // Normal case: render with real data
+            render(meta);
+        }
+
+
 
         function updateDebugLog(centerIdx) {
             const start = Math.max(0, centerIdx - 30);
@@ -2353,6 +2634,152 @@
             if (activeEl) {
                 activeEl.scrollIntoView({ block: "center", behavior: "auto" });
             }
+        }
+
+        function resetState() {
+            // Reset frame buffers and related variables
+            fmFrameR = null;
+            fmFrameG = null;
+            fmFrameB = null;
+            fmPixelEvent = null;
+            fmPixelRawWord = null;
+            fmLatPulses = [];       // Reset LAT pulses
+            fmRgbRows = [];         // Reset RGB rows
+            bitEvents = [];         // Reset bit events
+            bitIndexBySample = null;
+            fmBitMetaBySample = null;
+            fmRgbDataMinSample = 0;
+            fmRgbDataMaxSample = 0;
+
+            // Reset virtual machine and playback state
+            vmAddress = 0;
+
+            // Reset time and signal data
+            dataTimes = null;
+            dataSignals = null;
+            totalEvents = 0;
+            firstDataIndex = 0;
+            keyframes = [];          // Reset keyframes
+            playbackIndex = 0;      // Reset playback index
+        }
+
+        function logAllVariables(beforeParsing = true) {
+            if (beforeParsing) {
+                console.log("----- Before Parsing CSV -----");
+            } else {
+                console.log("----- After Parsing CSV -----");
+            }
+
+            // Log all key variables
+            console.log("PANEL_WIDTH:", PANEL_WIDTH);
+            console.log("PANEL_HEIGHT:", PANEL_HEIGHT);
+            console.log("DISPLAY_MARGIN:", DISPLAY_MARGIN);
+            console.log("PIXEL_GAP:", PIXEL_GAP);
+            console.log("GRID_EXTRA:", GRID_EXTRA);
+
+            console.log("MASK_ADDR:", MASK_ADDR);
+            console.log("MASK_CLK:", MASK_CLK);
+            console.log("MASK_LAT:", MASK_LAT);
+            console.log("MASK_OE:", MASK_OE);
+
+            console.log("FM6373_LAST_INIT_WORD:", FM6373_LAST_INIT_WORD);
+            console.log("MAX_SCAN_ROWS:", MAX_SCAN_ROWS);
+
+            console.log("fm6373Mode:", fm6373Mode);
+
+            console.log("dataTimes:", dataTimes);
+            console.log("dataSignals:", dataSignals);
+            console.log("totalEvents:", totalEvents);
+            console.log("firstDataIndex:", firstDataIndex);
+
+            console.log("keyframes:", keyframes);
+            console.log("playbackIndex:", playbackIndex);
+            console.log("fineSeekBaseIndex:", fineSeekBaseIndex);
+            console.log("isPlaying:", isPlaying);
+            console.log("lastFrameTime:", lastFrameTime);
+            console.log("playbackAccumulator:", playbackAccumulator);
+
+            console.log("forceWriteBlack:", forceWriteBlack);
+            console.log("persistFrame:", persistFrame);
+
+            console.log("waveZoom:", waveZoom);
+            console.log("isPanning:", isPanning);
+            console.log("lastPanX:", lastPanX);
+            console.log("panAccumulator:", panAccumulator);
+            console.log("latPulseUntil:", latPulseUntil);
+
+            console.log("vmAddress:", vmAddress);
+            console.log("vmBuffer0:", vmBuffer0);
+            console.log("vmBuffer1:", vmBuffer1);
+            console.log("vmGridState:", vmGridState);
+
+            console.log("pixelElements:", pixelElements);
+            console.log("domGridState:", domGridState);
+
+            console.log("pixR:", pixR);
+            console.log("pixG:", pixG);
+            console.log("pixB:", pixB);
+
+            console.log("fmFrameR:", fmFrameR);
+            console.log("fmFrameG:", fmFrameG);
+            console.log("fmFrameB:", fmFrameB);
+
+            console.log("fmPixelEvent:", fmPixelEvent);
+            console.log("fmPixelRawWord:", fmPixelRawWord);
+
+            console.log("fmLatPulses:", fmLatPulses);
+            console.log("fmRgbRows:", fmRgbRows);
+            console.log("bitEvents:", bitEvents);
+            console.log("bitIndexBySample:", bitIndexBySample);
+
+            console.log("fmBitMetaBySample:", fmBitMetaBySample);
+            console.log("fmRgbDataMinSample:", fmRgbDataMinSample);
+            console.log("fmRgbDataMaxSample:", fmRgbDataMaxSample);
+
+            console.log("enabledChannels:", enabledChannels);
+
+            // DOM Element References (if needed for debugging)
+            console.log("dropZone:", dropZone);
+            console.log("fileInput:", fileInput);
+            console.log("grid:", grid);
+            console.log("configDisplay:", configDisplay);
+            console.log("detectedWidthDisplay:", detectedWidthDisplay);
+            console.log("headersStatus:", headersStatus);
+            console.log("fileStatus:", fileStatus);
+            console.log("widthInput:", widthInput);
+            console.log("heightInput:", heightInput);
+            console.log("btnApplyConfig:", btnApplyConfig);
+            console.log("loadingOverlay:", loadingOverlay);
+            console.log("debugList:", debugList);
+            console.log("waveCanvas:", waveCanvas);
+            console.log("waveformContainer:", waveformContainer);
+            console.log("channelTogglesDiv:", channelTogglesDiv);
+            console.log("matrixScrollArea:", matrixScrollArea);
+            console.log("mainSplitter:", mainSplitter);
+            console.log("interfaceContainer:", interfaceContainer);
+            console.log("elTime:", elTime);
+            console.log("elAddr:", elAddr);
+            console.log("elScan:", elScan);
+            console.log("elShift:", elShift);
+            console.log("elRgbPos:", elRgbPos);
+            console.log("elRgbWord:", elRgbWord);
+            console.log("elSigOE:", elSigOE);
+            console.log("elSigLAT:", elSigLAT);
+            console.log("elSigCLK:", elSigCLK);
+            console.log("scrubber:", scrubber);
+            console.log("scrubVal:", scrubVal);
+            console.log("totalVal:", totalVal);
+            console.log("speedSlider:", speedSlider);
+            console.log("speedDisplay:", speedDisplay);
+            console.log("fineSeekSlider:", fineSeekSlider);
+            console.log("fineSeekDisplay:", fineSeekDisplay);
+            console.log("btnTogglePlay:", btnTogglePlay);
+            console.log("overwriteBlackToggle:", overwriteBlackToggle);
+            console.log("persistFrameToggle:", persistFrameToggle);
+            console.log("fmBrightnessToggle:", fmBrightnessToggle);
+            console.log("fmBrightnessLabel:", fmBrightnessLabel);
+            console.log("matrixResizeObserver:", matrixResizeObserver);
+            console.log("waveformResizeObserver:", waveformResizeObserver);
         }
 
         // ------------------------------------------------------------------
