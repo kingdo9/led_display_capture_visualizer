@@ -300,10 +300,17 @@
     >
         <!-- 1. LED DISPLAY ------------------------------------------------- -->
         <div class="top-column matrix-column bg-gray-900">
-            <h1
-                class="text-sm font-bold text-white p-2 text-center border-b border-gray-800"            >
-                LED DISPLAY
-            </h1>
+                    <!-- Header with Export Button -->
+                    <div class="flex justify-between items-center p-2 border-b border-gray-800 bg-gray-900">
+                        <h1 class="text-sm font-bold text-white">LED DISPLAY</h1>
+                        <button 
+                            id="btn-export-csv" 
+                            class="bg-blue-700 hover:bg-blue-600 text-white text-[10px] py-1 px-2 rounded border border-blue-500 shadow-sm transition-colors"
+                            title="Export decoded registers and pixel data to CSV"
+                        >
+                            Export CSV
+                        </button>
+                    </div>
             <!-- FM6373 brightness toggle -->
             <div class="px-2 pb-1 flex items-center justify-center gap-2 text-[10px] text-gray-400 border-b border-gray-800">
                 <span class="font-semibold tracking-wide uppercase">Experiment Brightness</span>
@@ -715,6 +722,10 @@
             Left: Control | Right: Data | Scroll to Zoom
         </div>
     </div>
+    <!-- ======================= PIXEL POPUP TOOLTIP ====================== -->
+    <div id="pixel-popup" class="hidden fixed z-50 bg-gray-800/95 border border-blue-500 rounded px-3 py-2 text-xs shadow-xl backdrop-blur-sm pointer-events-none transition-opacity duration-100">
+        <!-- Content will be injected via JS -->
+    </div>    
 
     <!-- ================================================================== -->
     <!-- SCRIPT: CSV parsing, FM6373 decoding, playback & UI wiring         -->
@@ -872,6 +883,7 @@
 
         // Switches
         const logGlobalVariables = false
+        const DEBUG_WORDS = true;
         // For debugging row drawing from console
         window.debugRow = -1;           
 
@@ -908,7 +920,6 @@
 
             persistFrameToggle.checked = persistFrame;
 
-            // New: FM6373 brightness toggle initial state
             if (fmBrightnessToggle) {
                 fmBrightnessToggle.checked = fmUseBrightness;
                 fmBrightnessLabel.textContent = fmUseBrightness ? "On" : "Off";
@@ -920,6 +931,15 @@
             requestAnimationFrame(resizeCanvas);
 
             wireUIEvents();
+
+            // --- FIX: Force default text size on load ---
+            // 1. Remove the static HTML class that forces small text
+            if (elRgbWord) {
+                elRgbWord.classList.remove("text-[10px]");
+                elRgbWord.classList.add("text-xs");
+            }
+            // 2. Render the "empty" state immediately using the JS template
+            updateRgbStats(0);
         }
 
         // ------------------------------------------------------------------
@@ -948,31 +968,58 @@
             domGridState = new Uint8Array(count);
 
             const fragment = document.createDocumentFragment();
+            const popup = document.getElementById("pixel-popup"); // Get the popup element
 
             for (let i = 0; i < count; i++) {
                 const p = document.createElement("div");
                 p.className = "pixel";
 
                 const idx = i;
-                p.addEventListener("click", () => {
+                p.addEventListener("click", (e) => {
+                    // prevent the matrix scroll area from immediately hiding it
+                    e.stopPropagation(); 
+
                     const x = idx % PANEL_WIDTH;
                     const y = Math.floor(idx / PANEL_WIDTH);
-                    let msg = `Pixel (${x},${y}) [idx=${idx}]`;
+                    
+                    // Default values if FM decoding isn't active
+                    let rawWord = 0;
+                    let hex = "0000";
+                    let dec = 0;
+                    let recordedMsg = "No Data";
 
-                    if (fm6373Mode && fmFrameR && fmPixelEvent && fmPixelRawWord) {
-                        const b = fmFrameR[idx];
-                        const ev = fmPixelEvent[idx];
-                        const rawWord = fmPixelRawWord[idx];
-                        msg += ` | fmFrameR=${b}`;
-                        if (ev >= 0) {
-                            const rawHex = rawWord.toString(16).padStart(4, "0");
-                            msg += ` | written at event ${ev}, rawWord=0x${rawHex}`;
+                    if (fm6373Mode && fmPixelRawWord) {
+                        rawWord = fmPixelRawWord[idx];
+                        dec = rawWord; // Uint16 is the decimal value
+                        hex = rawWord.toString(16).padStart(4, "0").toUpperCase();
+                        
+                        // Check if an event actually wrote this
+                        if (fmPixelEvent && fmPixelEvent[idx] >= 0) {
+                            recordedMsg = `Event #${fmPixelEvent[idx]}`;
                         } else {
-                            msg += " | (no FM6373 write recorded)";
+                            recordedMsg = "Not Written";
                         }
                     }
 
-                    console.log(msg);
+                    // Console log (keep existing functionality)
+                    console.log(`Pixel (${x},${y}) | Raw: 0x${hex} (${dec}) | ${recordedMsg}`);
+
+                    // --- UPDATE POPUP UI ---
+                    if (popup) {
+                        popup.innerHTML = `
+                            <div class="font-bold text-blue-400 mb-1 border-b border-gray-600 pb-1">Pixel (${x}, ${y})</div>
+                            <div class="grid grid-cols-[40px_1fr] gap-x-2 text-gray-300">
+                                <span>Hex:</span> <span class="text-white font-mono">0x${hex}</span>
+                                <span>Dec:</span> <span class="text-yellow-400 font-mono">${dec}</span>
+                                <span class="col-span-2 text-[10px] text-gray-500 mt-1 italic">${recordedMsg}</span>
+                            </div>
+                        `;
+                        
+                        // Position popup near mouse
+                        popup.style.left = `${e.clientX + 15}px`;
+                        popup.style.top = `${e.clientY + 15}px`;
+                        popup.classList.remove("hidden");
+                    }
                 });
 
                 fragment.appendChild(p);
@@ -1146,6 +1193,18 @@
                 fitGridToContainer();
             });
 
+            // NEW: Hide popup when clicking anywhere else in the matrix area
+            matrixScrollArea.addEventListener("click", () => {
+                const popup = document.getElementById("pixel-popup");
+                if (popup) popup.classList.add("hidden");
+            });
+
+            // Export Button
+            const btnExport = document.getElementById("btn-export-csv");
+            if (btnExport) {
+                btnExport.addEventListener("click", exportData);
+            }
+
             // Config / toggles
             btnApplyConfig.addEventListener("click", () => {
                 loadingOverlay.classList.remove("hidden");
@@ -1292,6 +1351,101 @@
             }, 50);
         }
 
+        // ------------------------------------------------------------------
+        //  EXPORT TO CSV
+        // ------------------------------------------------------------------
+        function exportData() {
+            if (!fm6373Mode || !fmBitMetaBySample || fmBitMetaBySample.size === 0) {
+                alert("No decoded FM6373 data available. Please load a valid capture file first.");
+                return;
+            }
+
+            const rows = [];
+            // CSV Header
+            rows.push([
+                "Time_s", 
+                "Event_Idx", 
+                "Type", 
+                "Row_or_RegBlock", 
+                "Col_or_WordIdx", 
+                "R0_Hex", "G0_Hex", "B0_Hex", 
+                "R1_Hex", "G1_Hex", "B1_Hex",
+                "R0_Int", "G0_Int", "B0_Int", 
+                "R1_Int", "G1_Int", "B1_Int"
+            ].join(","));
+
+            // We iterate through the bitEvents to keep time order.
+            // We only export when we hit the last bit (bitIndex == 15) of a 16-bit word 
+            // to avoid duplicates.
+            
+            let count = 0;
+
+            for (const ev of bitEvents) {
+                const s = ev.sampleIndex;
+                const meta = fmBitMetaBySample.get(s);
+
+                // Only process if we have metadata and it is the last bit of the word (LSB)
+                // In the decoder: bitIndex 0 = MSB, bitIndex 15 = LSB.
+                if (meta && meta.bitIndex === 15) {
+                    const t = dataTimes[s].toFixed(8);
+                    const w = meta.words;
+                    
+                    let rowVal = "";
+                    let colVal = "";
+                    
+                    if (meta.type === "RGB") {
+                        rowVal = meta.row;
+                        colVal = meta.x; // The generic X coordinate
+                    } else if (meta.type === "REG") {
+                        // For registers, use the label number (e.g. "Register 1") and word index
+                        const regNum = meta.label.replace("Register ", "");
+                        rowVal = regNum; 
+                        colVal = meta.wordInBlock;
+                    } else {
+                        continue; // Skip INIT pulses or unknown types
+                    }
+
+                    const line = [
+                        t,
+                        s,
+                        meta.type,
+                        rowVal,
+                        colVal,
+                        `0x${w.R0.toString(16).padStart(4,'0').toUpperCase()}`,
+                        `0x${w.G0.toString(16).padStart(4,'0').toUpperCase()}`,
+                        `0x${w.B0.toString(16).padStart(4,'0').toUpperCase()}`,
+                        `0x${w.R1.toString(16).padStart(4,'0').toUpperCase()}`,
+                        `0x${w.G1.toString(16).padStart(4,'0').toUpperCase()}`,
+                        `0x${w.B1.toString(16).padStart(4,'0').toUpperCase()}`,
+                        w.R0, w.G0, w.B0,
+                        w.R1, w.G1, w.B1
+                    ].join(",");
+
+                    rows.push(line);
+                    count++;
+                }
+            }
+
+            if (count === 0) {
+                alert("No complete words found to export.");
+                return;
+            }
+
+            // Create Blob and Download
+            const blob = new Blob([rows.join("\n")], { type: "text/csv" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.style.display = "none";
+            a.href = url;
+            a.download = "fm6373_decoded_data.csv";
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(url);
+            document.body.removeChild(a);
+            
+            console.log(`Exported ${count} rows to CSV.`);
+        }
+        
         /**
          * Core CSV parser.
          * Compresses each row into:
@@ -1712,226 +1866,302 @@
             // Apply gamma to boost low levels so patterns are visible.
             // gamma ≈ 2.2, so we raise to 1/gamma.
             const norm = raw16 / 65535;
-            const gammaInv = 1 / 2.2;
+            const gammaInv = 1 / 1.8;
             const scaled = Math.pow(norm, gammaInv); // 0..1
 
             return Math.round(scaled * 255); // 0..255
         }        
         
         // ------------------------------------------------------------------
-        //  FM6373: BUILD FRAME BUFFERS FROM R0/R1 STREAM (LAT block-based)
+        //  FM6373: BUILD FRAME BUFFERS + DECODE REGISTERS
         // ------------------------------------------------------------------
         function buildFm6373FrameFromR0(startIdx = 0) {
             if (!fm6373Mode || !dataSignals) return;
 
-            console.time("FM6373 Decode (LAT-based)");
-            if (!logGlobalVariables){console.clear();}
-            console.log(
-                "%c FM6373 DECODE STARTED (LAT-based R0/R1 blocks) ",
-                "background: blue; color: white"
-            );
+            console.time("FM6373 Decode");
+            if (!logGlobalVariables) { console.clear(); }
+            console.log("%c FM6373 DECODE STARTED ", "background: blue; color: white");
 
             const w = PANEL_WIDTH;
             const h = PANEL_HEIGHT;
             const totalPixels = w * h;
 
-            if (!fmFrameR || fmFrameR.length !== totalPixels) {
-                allocFmFrame();
-            }
-
+            // 1. Reset Arrays
+            if (!fmFrameR || fmFrameR.length !== totalPixels) allocFmFrame();
             fmFrameR.fill(0);
             if (fmFrameG) fmFrameG.fill(0);
             if (fmFrameB) fmFrameB.fill(0);
             fmPixelEvent.fill(-1);
             fmPixelRawWord.fill(0);
 
-            // Reset RGB bit metadata
+            // Reset Metadata Maps
             fmBitMetaBySample = new Map();
             fmRgbDataMinSample = Number.MAX_SAFE_INTEGER;
-            fmRgbDataMaxSample = 0;            
+            fmRgbDataMaxSample = 0;
 
-            // Ensure LAT pulses + RGB rows are available
-            if (!fmLatPulses.length || !fmRgbRows.length) {
-                detectFrameStartFromR0();
-            }
-
-            if (!fmRgbRows.length) {
-                console.warn("FM6373: No RGB LAT rows detected, aborting decode.");
-                console.timeEnd("FM6373 Decode (LAT-based)");
-                return;
-            }
-
-            // Build flat bit stream (includes CLK while LAT is HIGH)
+            // 2. Ensure we have LAT pulses and Bit Events
+            if (!fmLatPulses.length) scanLatPulses();
             buildBitEventsFromR0R1();
-            if (!bitEvents || !bitEvents.length) {
-                console.warn("FM6373: No bit events from R0/R1.");
-                console.timeEnd("FM6373 Decode (LAT-based)");
+
+            if (!fmLatPulses.length || !bitEvents.length) {
+                console.warn("FM6373: No LAT pulses or Bit events found.");
+                console.timeEnd("FM6373 Decode");
                 return;
             }
 
+            // 3. Constants for Decoding
             const WORDS_PER_BLOCK = 8;
             const BITS_PER_WORD = 16;
             const BITS_PER_BLOCK = WORDS_PER_BLOCK * BITS_PER_WORD;
-            const BLOCKS_PER_ROW = 16;
-            const maxRowsToDecode = Math.min(fmRgbRows.length, MAX_SCAN_ROWS);
+            const BLOCKS_PER_ROW = 16; // Standard FM6373 architecture
 
-            for (let rowScan = 0; rowScan < maxRowsToDecode; rowScan++) {
-                const pulsesForRow = fmRgbRows[rowScan];
-                if (!pulsesForRow || pulsesForRow.length < BLOCKS_PER_ROW) break;
+            // Counters
+            let rgbRowCount = 0;
+            let regBlockCount = 1;
+            // NEW: keep track of the row group currently open in the console
+            let debugCurrentRow = null;
 
-                const yTop = rowScan;
-                const yBottom = rowScan + 32; // 1/32 scan pairing
+            // 4. Iterate ALL LAT Pulses and classify them
+            for (let i = 0; i < fmLatPulses.length; i++) {
+                const pulse = fmLatPulses[i];
+                const clkCount = pulse.clkEdges;
 
-                console.groupCollapsed(
-                    `FM6373: Row ${rowScan} (Y=${yTop}${
-                        yBottom < h ? "/" + yBottom : ""
-                    })`
-                );
+                // Determine Block Type based on CLK High count inside LAT
+                let blockType = "UNKNOWN";
+                let label = "";
+                
+                if (clkCount === 3) {
+                    blockType = "INIT";
+                    label = "Init: VSYNC (3 CLK)";
+                } else if (clkCount === 11) {
+                    blockType = "INIT";
+                    label = "Init: EN_OP (11 CLK)";
+                } else if (clkCount === 14) {
+                    blockType = "INIT";
+                    label = "Init: PRE_ACT (14 CLK)";
+                } else if (clkCount === 5) {
+                    blockType = "REG";
+                    label = `Register ${regBlockCount}`;
+                } else if (clkCount === 1) {
+                    blockType = "RGB";
+                    // Label is calculated below based on row/block index
+                } else {
+                    // Noise or unknown pulse, skip
+                    continue;
+                }
 
-                for (let block = 0; block < BLOCKS_PER_ROW; block++) {
-                    const pulse = pulsesForRow[block];
-
-                    const anchorSample = pulse.clkSampleIndex;
-                    if (anchorSample == null || anchorSample < 0) {
-                        console.warn(
-                            `FM6373: LAT pulse (row ${rowScan}, block ${block}) has no CLK inside; skipping`
-                        );
-                        continue;
+                // -- Logic A: Initialization Pulses --
+                if (blockType === "INIT") {
+                    for (let s = pulse.startIndex; s <= pulse.endIndex; s++) {
+                        fmBitMetaBySample.set(s, { type: "INIT", label: label });
                     }
+                    continue;
+                }
 
-                    // Find index of the bit event that corresponds to this CLK
-                    let anchorBitIndex =
-                        bitIndexBySample && bitIndexBySample.get(anchorSample);
-                    if (anchorBitIndex === undefined) {
-                        // Fallback: search by range
-                        anchorBitIndex = bitEvents.findIndex(
-                            (b) =>
-                                b.sampleIndex >= pulse.startIndex &&
-                                b.sampleIndex <= pulse.endIndex
-                        );
-                    }
-                    if (anchorBitIndex < 0) {
-                        console.warn(
-                            `FM6373: No bit event found for anchor sample ${anchorSample} (row ${rowScan}, block ${block})`
-                        );
-                        continue;
-                    }
+                // -- Logic B: Data Decoding (Registers and RGB) --
+                const anchorSample = pulse.clkSampleIndex;
+                if (anchorSample == null || anchorSample < 0) continue;
 
-                    const lastBitIndex = anchorBitIndex;
-                    const firstBitIndex = lastBitIndex - (BITS_PER_BLOCK - 1);
-                    if (firstBitIndex < 0) {
-                        console.warn(
-                            `FM6373: Not enough bits before anchor sample ${anchorSample} to form 8 words (row ${rowScan}, block ${block}).`
-                        );
-                        continue;
-                    }
+                // Find the bit event corresponding to the anchor CLK
+                let anchorBitIndex = bitIndexBySample && bitIndexBySample.get(anchorSample);
+                if (anchorBitIndex === undefined) {
+                    // Safety fallback
+                    anchorBitIndex = bitEvents.findIndex(b => b.sampleIndex >= pulse.startIndex && b.sampleIndex <= pulse.endIndex);
+                }
 
-                    console.groupCollapsed(
-                        `Row ${rowScan}, block ${block} @ LAT start=${pulse.startIndex}, anchorCLK=${anchorSample}`
-                    );
+                if (anchorBitIndex < 0) continue;
 
-                    for (let wordInBlock = 0; wordInBlock < WORDS_PER_BLOCK; wordInBlock++) {
-                        let wordR0 = 0,
-                            wordG0 = 0,
-                            wordB0 = 0,
-                            wordR1 = 0,
-                            wordG1 = 0,
-                            wordB1 = 0;
+                // Check history depth
+                const lastBitIndex = anchorBitIndex;
+                const firstBitIndex = lastBitIndex - (BITS_PER_BLOCK - 1);
 
-                        const bitBase = firstBitIndex + wordInBlock * BITS_PER_WORD;
-                        const sampleIndicesForWord = new Array(BITS_PER_WORD);
+                if (firstBitIndex < 0) continue; // Not enough data
 
-                        for (let b = 0; b < BITS_PER_WORD; b++) {
-                            const ev = bitEvents[bitBase + b];
+                // Update global timeline range
+                if (bitEvents[firstBitIndex].sampleIndex < fmRgbDataMinSample) fmRgbDataMinSample = bitEvents[firstBitIndex].sampleIndex;
+                if (bitEvents[lastBitIndex].sampleIndex > fmRgbDataMaxSample) fmRgbDataMaxSample = bitEvents[lastBitIndex].sampleIndex;
 
-                            sampleIndicesForWord[b] = ev.sampleIndex;
+                // Prepare context for this block
+                let metaContext = {}; 
 
-                            wordR0 = ((wordR0 << 1) | ev.bitR0) & 0xffff;
-                            wordG0 = ((wordG0 << 1) | ev.bitG0) & 0xffff;
-                            wordB0 = ((wordB0 << 1) | ev.bitB0) & 0xffff;
+                if (blockType === "REG") {
+                    metaContext = { type: "REG", label: label };
+                    regBlockCount++;
+                } else if (blockType === "RGB") {
+                    const overallRgbBlockIndex = rgbRowCount; 
+                    const rowScan  = Math.floor(overallRgbBlockIndex / BLOCKS_PER_ROW);
+                    const blockCol = overallRgbBlockIndex % BLOCKS_PER_ROW;
+                    
+                    metaContext = { 
+                        type: "RGB", 
+                        row: rowScan, 
+                        block: blockCol,
+                        yTop: rowScan,
+                        yBottom: rowScan + 32
+                    };
+                    rgbRowCount++;
 
-                            wordR1 = ((wordR1 << 1) | ev.bitR1) & 0xffff;
-                            wordG1 = ((wordG1 << 1) | ev.bitG1) & 0xffff;
-                            wordB1 = ((wordB1 << 1) | ev.bitB1) & 0xffff;
+                    // NEW: console tree – Row -> Block
+                    if (DEBUG_WORDS) {
+                        const yTop    = metaContext.yTop;
+                        const yBottom = metaContext.yBottom;
+
+                        // Optional: limit to a single row using window.debugRow
+                        const rowMatchesFilter =
+                            (window.debugRow === -1 || window.debugRow === rowScan);
+
+                        if (rowMatchesFilter) {
+                            // If this is a new row, close the previous row group and open a new one
+                            if (debugCurrentRow !== rowScan) {
+                                if (debugCurrentRow !== null) {
+                                    console.groupEnd(); // close previous row
+                                }
+
+                                console.groupCollapsed(
+                                    `FM6373: Row ${rowScan} (Y=${yTop}${
+                                        yBottom < h ? "/" + yBottom : ""
+                                    })`
+                                );
+                                debugCurrentRow = rowScan;
+                            }
+
+                            // Block-level group (expand under row)
+                            console.groupCollapsed(
+                                `Row ${rowScan}, block ${blockCol} ` +
+                                `@ LAT start=${pulse.startIndex}, anchorCLK=${anchorSample}`
+                            );
                         }
+                    }
+                }
 
-                        const firstSample = sampleIndicesForWord[0];
-                        const lastBitSample = sampleIndicesForWord[BITS_PER_WORD - 1];
+                // --- Phase 1: Decode all 8 words into arrays ---
+                const blockData = {
+                    R0: [], G0: [], B0: [],
+                    R1: [], G1: [], B1: []
+                };
+                // To temporarily store where each word is located
+                const wordLocationInfo = []; 
 
-                        // Track global RGB data range
-                        if (firstSample < fmRgbDataMinSample) fmRgbDataMinSample = firstSample;
-                        if (lastBitSample > fmRgbDataMaxSample) fmRgbDataMaxSample = lastBitSample;
+                for (let wordInBlock = 0; wordInBlock < WORDS_PER_BLOCK; wordInBlock++) {
+                    let wordR0 = 0, wordG0 = 0, wordB0 = 0;
+                    let wordR1 = 0, wordG1 = 0, wordB1 = 0;
 
-                        // Interleaved Modulo-16 addressing:
-                        const wordIndex = wordInBlock; // 0..7
-                        const x = wordIndex * BLOCKS_PER_ROW + block;
+                    const bitBase = firstBitIndex + wordInBlock * BITS_PER_WORD;
+                    const bitSamples = [];
 
-                        // --- Console debug: binary + hex for both channels ---
+                    for (let b = 0; b < BITS_PER_WORD; b++) {
+                        const ev = bitEvents[bitBase + b];
+                        bitSamples.push(ev.sampleIndex);
+
+                        wordR0 = ((wordR0 << 1) | ev.bitR0) & 0xffff;
+                        wordG0 = ((wordG0 << 1) | ev.bitG0) & 0xffff;
+                        wordB0 = ((wordB0 << 1) | ev.bitB0) & 0xffff;
+                        wordR1 = ((wordR1 << 1) | ev.bitR1) & 0xffff;
+                        wordG1 = ((wordG1 << 1) | ev.bitG1) & 0xffff;
+                        wordB1 = ((wordB1 << 1) | ev.bitB1) & 0xffff;
+                    }
+
+                    // Store words
+                    blockData.R0.push(wordR0);
+                    blockData.G0.push(wordG0);
+                    blockData.B0.push(wordB0);
+                    blockData.R1.push(wordR1);
+                    blockData.G1.push(wordG1);
+                    blockData.B1.push(wordB1);
+
+                    wordLocationInfo.push({ bitSamples });
+
+                    // --- Console debug: binary + hex for both channels (R0/R1 only) ---
+                    if (DEBUG_WORDS && blockType === "RGB") {
                         const binR0 = wordR0.toString(2).padStart(16, "0");
                         const binR1 = wordR1.toString(2).padStart(16, "0");
                         const hexR0 = "0x" + wordR0.toString(16).padStart(4, "0");
                         const hexR1 = "0x" + wordR1.toString(16).padStart(4, "0");
 
-                        console.log(
-                            `Word ${wordInBlock} (x=${x}) @event ${lastBitSample}  |  ` +
+                        const x             = wordInBlock * BLOCKS_PER_ROW + metaContext.block;
+                        const lastBitSample = bitSamples[BITS_PER_WORD - 1];
+
+                        // Optional row filter again if you want:
+                        if (window.debugRow === -1 || window.debugRow === metaContext.row) {
+                            console.log(
+                                `Word ${wordInBlock} (x=${x}) @event ${lastBitSample}  |  ` +
                                 `R0 ${binR0} (${hexR0})  R1 ${binR1} (${hexR1})`
-                        );
-
-                        // --- Map to pixel brightness (still only R channel for now) ---
-                        const brightnessTop = fmWordToBrightness(wordR0);
-                        const brightnessBottom = fmWordToBrightness(wordR1);
-
-                        if (x < w) {
-                            if (yTop < h) {
-                                const idxTop = yTop * w + x;
-                                fmFrameR[idxTop] = brightnessTop;
-                                fmPixelEvent[idxTop] = lastBitSample;
-                                fmPixelRawWord[idxTop] = wordR0;
-                            }
-
-                            if (yBottom < h) {
-                                const idxBottom = yBottom * w + x;
-                                fmFrameR[idxBottom] = brightnessBottom;
-                                fmPixelEvent[idxBottom] = lastBitSample;
-                                fmPixelRawWord[idxBottom] = wordR1;
-                            }
-                        }
-
-                        // --- NEW: attach per-bit metadata for this word ---
-                        const wordsObj = {
-                            R0: wordR0,
-                            G0: wordG0,
-                            B0: wordB0,
-                            R1: wordR1,
-                            G1: wordG1,
-                            B1: wordB1
-                        };
-
-                        for (let b = 0; b < BITS_PER_WORD; b++) {
-                            const sampleIndexBit = sampleIndicesForWord[b];
-                            fmBitMetaBySample.set(sampleIndexBit, {
-                                row: rowScan,
-                                block,
-                                wordInBlock,
-                                bitIndex: b,            // 0 = MSB, 15 = LSB
-                                x,
-                                yTop,
-                                yBottom: yBottom < h ? yBottom : -1,
-                                words: wordsObj
-                            });
+                            );
                         }
                     }
 
+                    // Pixel Drawing (RGB Only)
+                    if (blockType === "RGB") {
+                        const x = wordInBlock * BLOCKS_PER_ROW + metaContext.block;
+                        const brightnessTop = fmWordToBrightness(wordR0);
+                        const brightnessBottom = fmWordToBrightness(wordR1);
+                        const lastBitSample = bitSamples[BITS_PER_WORD - 1];
 
-                    console.groupEnd(); // block
+                        if (x < w) {
+                            if (metaContext.yTop < h) {
+                                const idx = metaContext.yTop * w + x;
+                                fmFrameR[idx] = brightnessTop;
+                                fmPixelEvent[idx] = lastBitSample;
+                                fmPixelRawWord[idx] = wordR0;
+                            }
+                            if (metaContext.yBottom < h) {
+                                const idx = metaContext.yBottom * w + x;
+                                fmFrameR[idx] = brightnessBottom;
+                                fmPixelEvent[idx] = lastBitSample;
+                                fmPixelRawWord[idx] = wordR1;
+                            }
+                        }
+                    }
                 }
 
-                console.groupEnd(); // row
+                // --- Phase 2: Create Metadata with full block context ---
+                // We do this after Phase 1 so `blockData` is fully populated
+                for (let wordInBlock = 0; wordInBlock < WORDS_PER_BLOCK; wordInBlock++) {
+                    const currentWords = {
+                        R0: blockData.R0[wordInBlock],
+                        G0: blockData.G0[wordInBlock],
+                        B0: blockData.B0[wordInBlock],
+                        R1: blockData.R1[wordInBlock],
+                        G1: blockData.G1[wordInBlock],
+                        B1: blockData.B1[wordInBlock],
+                    };
+
+                    const bitsInfo = wordLocationInfo[wordInBlock].bitSamples;
+
+                    for (let b = 0; b < BITS_PER_WORD; b++) {
+                        const sIndex = bitsInfo[b];
+                        
+                        const finalMeta = {
+                            ...metaContext,
+                            wordInBlock: wordInBlock,
+                            bitIndex: b, // 0 = MSB
+                            words: currentWords,
+                            // Attach full block data for Register list view
+                            blockData: (blockType === "REG") ? blockData : undefined,
+                            // If RGB, store coordinates
+                            x: (blockType === "RGB") ? (wordInBlock * BLOCKS_PER_ROW + metaContext.block) : undefined
+                        };
+
+                        fmBitMetaBySample.set(sIndex, finalMeta);
+                    }
+                }
+                // NEW: close block group (if we opened it)
+                if (DEBUG_WORDS && blockType === "RGB") {
+                    // block
+                    if (window.debugRow === -1 || window.debugRow === metaContext.row) {
+                        console.groupEnd();
+                    }
+                }                                            
             }
-
-            console.timeEnd("FM6373 Decode (LAT-based)");
+            // NEW: close last row group, if any
+            if (DEBUG_WORDS && debugCurrentRow !== null) {
+                console.groupEnd(); // row
+            }            
+            
+            console.log(`Decoded ${rgbRowCount} RGB blocks, ${regBlockCount - 1} Registers.`);
+            console.timeEnd("FM6373 Decode");
+        
         }
-
 
         // ------------------------------------------------------------------
         //  PANEL CONFIG APPLY / RESIZING
@@ -2471,107 +2701,137 @@
         }
 
 
+        // ------------------------------------------------------------------
+        //  UI: UPDATE STATS PANEL (RGB / REGISTERS / INIT)
+        // ------------------------------------------------------------------
         function updateRgbStats(sampleIndex) {
             if (!elRgbPos || !elRgbWord) return;
 
+            // Ensure the container itself can visually overflow
+            elRgbWord.style.overflow = "visible"; 
+            elRgbWord.style.position = "relative";
+            elRgbWord.style.zIndex = "50"; 
+
             const labels = ["R0", "G0", "B0", "R1", "G1", "B1"];
 
-            const render = (meta) => {
-                const words = meta
-                    ? meta.words
-                    : {
-                        R0: 0,
-                        G0: 0,
-                        B0: 0,
-                        R1: 0,
-                        G1: 0,
-                        B1: 0,
-                    };
-
+            const renderData = (meta) => {
+                // Reset colors
+                elRgbPos.className = "text-gray-500"; 
+                
+                let type = null;
+                let words = { R0: 0, G0: 0, B0: 0, R1: 0, G1: 0, B1: 0 };
                 let bitFromMsb = null;
-                let bitFromLsb = null;
 
+                // 1. Header & Type Handling
                 if (meta) {
-                    // inside RGB data
-                    elRgbPos.classList.remove("text-gray-500");
-                    elRgbPos.classList.add("text-teal-400");
-                    elRgbPos.textContent =
-                        `Row ${meta.row}, Col ${meta.block} (x=${meta.x})`;
+                    type = meta.type;
+                    words = meta.words || words;
 
-                    bitFromMsb = meta.bitIndex;        // 0..15
-                    bitFromLsb = 15 - meta.bitIndex;   // 15..0
+                    if (type === "INIT") {
+                        elRgbPos.classList.add("text-yellow-400");
+                        elRgbPos.textContent = meta.label;
+                        elRgbWord.innerHTML = `<div class="mb-2 text-gray-400 italic text-xs">Initialization Signal</div>`;
+                        return;
+                    } 
+                    
+                    if (type === "REG") {
+                        elRgbPos.classList.add("text-pink-400");
+                        elRgbPos.textContent = `${meta.label} - Word ${meta.wordInBlock}`;
+                    } else if (type === "RGB") {
+                        elRgbPos.classList.add("text-teal-400");
+                        elRgbPos.textContent = `Row ${meta.row}, Col ${meta.block} (x=${meta.x})`;
+                    }
+
+                    if (meta.bitIndex !== undefined) {
+                        bitFromMsb = meta.bitIndex;
+                    }
                 } else {
-                    // no RGB meta -> show zeros but keep labels
                     elRgbPos.textContent = "--";
-                    elRgbPos.classList.remove("text-teal-400");
-                    elRgbPos.classList.add("text-gray-500");
                 }
 
-                const highlightBits = (value) => {
-                    const bin = value.toString(2).padStart(16, "0");
-                    if (bitFromMsb == null) {
-                        // no active bit -> plain bits
-                        return bin;
-                    }
-                    let out = "";
-                    for (let i = 0; i < bin.length; i++) {
-                        const ch = bin[i];
-                        if (i === bitFromMsb) {
-                            out += `<span class="text-yellow-300">${ch}</span>`;
-                        } else {
-                            out += ch;
-                        }
-                    }
-                    return out;
-                };
-
                 const lines = [];
-                const wordLabel = meta ? meta.wordInBlock : "--";
-                const bitLabel =
-                    bitFromLsb != null ? bitFromLsb : "--";
+                const wordLabel = (meta && meta.wordInBlock !== undefined) ? meta.wordInBlock : "--";
+                const bitLabel = (meta && meta.bitIndex !== undefined) ? (15 - meta.bitIndex) : "--";
+                
+                // Sub-header (Size: text-xs)
+                lines.push(`<div class="mb-1 text-gray-300 text-xs">Word ${wordLabel} · Bit ${bitLabel}</div>`);
 
-                lines.push(
-                    `<div class="mb-0.5 text-gray-300">Word ${wordLabel} · Bit ${bitLabel}</div>`
-                );
+                // 2. Data Rendering
+                if (type === "REG" && meta.blockData) {
+                    // --- REGISTER VIEW: List of 8 hex words ---
+                    labels.forEach((label) => {
+                        const values = meta.blockData[label]; 
+                        let valsHtml = "";
+                        
+                        values.forEach((v, idx) => {
+                            const hex = "0x" + v.toString(16).toUpperCase().padStart(4, "0");
+                            if (idx === meta.wordInBlock) {
+                                // Highlight: Bold White only
+                                valsHtml += `<span class="text-white font-bold">${hex}</span> `;
+                            } else {
+                                // Dim
+                                valsHtml += `<span class="text-gray-500">${hex}</span> `;
+                            }
+                        });
 
-                labels.forEach((label) => {
-                    const v = (words[label] >>> 0);
-                    const hex = "0x" + v.toString(16).padStart(4, "0");
-                    const bitsHtml = highlightBits(v);
+                        let channelClass = "text-sky-400";
+                        if (label[0] === "R") channelClass = "text-red-400";
+                        else if (label[0] === "G") channelClass = "text-green-400";
+                        else if (label[0] === "B") channelClass = "text-blue-400";
 
-                    let channelClass = "text-sky-400";
-                    if (label[0] === "R") channelClass = "text-red-400";
-                    else if (label[0] === "G") channelClass = "text-green-400";
-                    else if (label[0] === "B") channelClass = "text-blue-400";
+                        // Overlap allowed
+                        lines.push(
+                            `<div class="whitespace-nowrap leading-tight relative z-50" style="width: 200%;">` + 
+                            `<span class="${channelClass} w-8 inline-block font-bold text-xs">${label}</span>` +
+                            `<span class="font-mono text-xs ml-1">${valsHtml}</span>` + 
+                            `</div>`
+                        );
+                    });
 
-                    lines.push(
-                        `<div><span class="${channelClass}">${label}</span>` +
-                        ` - <span class="text-gray-200">${hex}</span>` +
-                        ` - <span class="font-mono">${bitsHtml}</span></div>`
-                    );
-                });
+                } else {
+                    // --- RGB / DEFAULT VIEW ---
+                    // Changed binary text size from text-[11px] to text-xs to match headers
+                    labels.forEach((label) => {
+                        const v = (words[label] >>> 0);
+                        const hex = "0x" + v.toString(16).toUpperCase().padStart(4, "0");
+                        
+                        let binHtml = v.toString(2).padStart(16, "0");
+                        if (bitFromMsb != null) {
+                            const ch = binHtml[bitFromMsb];
+                            const pre = binHtml.substring(0, bitFromMsb);
+                            const post = binHtml.substring(bitFromMsb + 1);
+                            binHtml = `${pre}<span class="text-yellow-300 font-bold bg-gray-700">${ch}</span>${post}`;
+                        }
+
+                        let channelClass = "text-sky-400";
+                        if (label[0] === "R") channelClass = "text-red-400";
+                        else if (label[0] === "G") channelClass = "text-green-400";
+                        else if (label[0] === "B") channelClass = "text-blue-400";
+
+                        const hexClass = meta ? "text-gray-200" : "text-gray-600";
+                        const binClass = meta ? "text-gray-400" : "text-gray-700";
+
+                        lines.push(
+                            `<div>` + 
+                            `<span class="${channelClass} w-8 inline-block text-xs font-bold">${label}</span>` +
+                            `<span class="${hexClass} mx-2 text-xs">${hex}</span>` +
+                            `<span class="font-mono text-xs ${binClass}">${binHtml}</span>` + 
+                            `</div>`
+                        );
+                    });
+                }
 
                 elRgbWord.innerHTML = lines.join("");
             };
 
-            // No FM6373 metadata -> show labels with zeroed words
             if (!fm6373Mode || !fmBitMetaBySample || fmBitMetaBySample.size === 0) {
-                render(null);
+                renderData(null);
                 return;
             }
 
             const meta = getRgbBitMetaForSample(sampleIndex);
-
-            // Outside RGB data region -> still show labels with zeros
-            if (!meta) {
-                render(null);
-                return;
-            }
-
-            // Normal case: render with real data
-            render(meta);
+            renderData(meta); 
         }
-
 
 
         function updateDebugLog(centerIdx) {
